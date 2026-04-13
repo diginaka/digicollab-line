@@ -1,0 +1,19 @@
+{
+  "orgId": "ur6j6",
+  "appId": "e1l0qk4jskajx1a5",
+  "env": "prod",
+  "features": [
+    {
+      "id": "1eryvpsxcn5xu3ee",
+      "path": ".",
+      "dev": {
+        "command": "npm run dev"
+      },
+      "build": {
+        "command": "npm run build",
+        "outputDir": "dist"
+      }
+    }
+  ],
+  "firstFeatureSub": "digicollab-line"
+}

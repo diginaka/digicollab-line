@@ -1,0 +1,78 @@
+{
+  "name": "デジコラボ LINE 基本操作ガイド",
+  "description": "友だち管理・ステップ配信・一斉配信・リッチメニューの基本操作を順にご案内します",
+  "steps": [
+    {
+      "target": "[data-nav='dashboard']",
+      "title": "ダッシュボード",
+      "content": "ここが全体の状況を一目で確認できるダッシュボードです。友だち数・配信数・稼働中のシーケンス数がまとめて表示されます。",
+      "placement": "right"
+    },
+    {
+      "target": "[data-connection-status]",
+      "title": "LINE接続ステータス",
+      "content": "画面右上のバッジで、LINE公式アカウントが接続されているか確認できます。最初は「LINE未接続」と表示されています。",
+      "placement": "bottom"
+    },
+    {
+      "target": "[data-nav='settings']",
+      "title": "まずは設定から",
+      "content": "はじめに「設定」画面でLINEのChannel Access Tokenを入力します。ここをクリックして設定画面を開いてみましょう。",
+      "placement": "right"
+    },
+    {
+      "target": "[data-token-input]",
+      "title": "トークンを貼り付け",
+      "content": "LINE Developersコンソールで発行した「チャネルアクセストークン（長期）」をここに貼り付けてください。",
+      "placement": "bottom"
+    },
+    {
+      "target": "[data-test-connection]",
+      "title": "接続テスト",
+      "content": "このボタンでトークンが正しく設定されたか確認できます。成功するとBot名が表示されて準備完了です。",
+      "placement": "top"
+    },
+    {
+      "target": "[data-nav='friends']",
+      "title": "友だち管理",
+      "content": "接続できたら「友だち管理」画面で、あなたのLINE公式アカウントの友だち一覧が表示されます。名前やタグで検索できます。",
+      "placement": "right"
+    },
+    {
+      "target": "[data-nav='sequences']",
+      "title": "ステップ配信",
+      "content": "「ステップ配信」は、友だち追加から数日間かけて自動でメッセージを送る機能です。ウェルカムメッセージやウェビナー案内に使えます。",
+      "placement": "right"
+    },
+    {
+      "target": "[data-add-sequence]",
+      "title": "シーケンス作成",
+      "content": "このボタンから新しいシーケンスを作れます。トリガー（いつ送るか）と複数のステップ（何を送るか）を設定します。",
+      "placement": "right"
+    },
+    {
+      "target": "[data-nav='broadcasts']",
+      "title": "一斉配信",
+      "content": "「一斉配信」は、タグで選んだ友だち全員に今すぐ（または予約で）メッセージを送る機能です。キャンペーン告知に便利です。",
+      "placement": "right"
+    },
+    {
+      "target": "[data-broadcast-create]",
+      "title": "配信作成",
+      "content": "対象タグを選び、メッセージを入力して配信ボタンを押すだけ。右側にLINEでの表示プレビューが出ます。",
+      "placement": "left"
+    },
+    {
+      "target": "[data-nav='richmenus']",
+      "title": "リッチメニュー",
+      "content": "「リッチメニュー」はチャット画面の下部に表示されるボタンメニューです。タグごとに別のメニューを自動切替できます。",
+      "placement": "right"
+    },
+    {
+      "target": "[data-content-area]",
+      "title": "これで準備完了！",
+      "content": "以上が基本操作です。データはあなたのLINEアカウント内に留まる安心設計（BYOK方式）。まずは設定画面からトークンを登録して始めましょう！",
+      "placement": "center"
+    }
+  ]
+}
