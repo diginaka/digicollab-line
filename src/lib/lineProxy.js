@@ -1,0 +1,137 @@
+// LINE API 汎用プロキシ
+// ブラウザからLINE APIを直接呼ぶとCORS制限があるため、
+// 中継サーバー経由で呼び出す。
+//
+// 使い方:
+//   import { getFollowers, sendBroadcast } from './lineProxy'
+//   const r = await getFollowers(token)
+//   if (r.success) { ... r.data ... }
+
+const PROXY_BASE = import.meta.env.VITE_N8N_WEBHOOK_BASE || ''
+const PROXY_URL = PROXY_BASE ? `${PROXY_BASE}/webhook/dc-line-proxy` : ''
+
+/**
+ * @param {{ token: string, method: 'GET'|'POST'|'PUT'|'DELETE', endpoint: string, body?: any }} request
+ * @returns {Promise<{ success: boolean, data?: any, error?: string }>}
+ */
+export async function callLineApi(request) {
+  if (!PROXY_URL) {
+    return { success: false, error: '連携サーバーのURLが未設定です' }
+  }
+  try {
+    const response = await fetch(PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: request.token,
+        method: request.method,
+        endpoint: request.endpoint,
+        body: request.body,
+      }),
+    })
+    if (!response.ok) {
+      return { success: false, error: `通信エラー (${response.status})` }
+    }
+    return await response.json()
+  } catch (err) {
+    return { success: false, error: err.message || '通信エラーが発生しました' }
+  }
+}
+
+// ==== 便利関数 ====
+
+export function getBotInfo(token) {
+  return callLineApi({ token, method: 'GET', endpoint: '/v2/bot/info' })
+}
+
+export function getFollowers(token, limit = 1000, start) {
+  const endpoint = start
+    ? `/v2/bot/followers/ids?limit=${limit}&start=${start}`
+    : `/v2/bot/followers/ids?limit=${limit}`
+  return callLineApi({ token, method: 'GET', endpoint })
+}
+
+export function getProfile(token, userId) {
+  return callLineApi({ token, method: 'GET', endpoint: `/v2/bot/profile/${userId}` })
+}
+
+export function sendMulticast(token, userIds, messages) {
+  return callLineApi({
+    token,
+    method: 'POST',
+    endpoint: '/v2/bot/message/multicast',
+    body: { to: userIds, messages },
+  })
+}
+
+export function sendBroadcast(token, messages) {
+  return callLineApi({
+    token,
+    method: 'POST',
+    endpoint: '/v2/bot/message/broadcast',
+    body: { messages },
+  })
+}
+
+export function pushMessage(token, to, messages) {
+  return callLineApi({
+    token,
+    method: 'POST',
+    endpoint: '/v2/bot/message/push',
+    body: { to, messages },
+  })
+}
+
+export function getMessageQuota(token) {
+  return callLineApi({ token, method: 'GET', endpoint: '/v2/bot/message/quota' })
+}
+
+export function getMessageQuotaConsumption(token) {
+  return callLineApi({ token, method: 'GET', endpoint: '/v2/bot/message/quota/consumption' })
+}
+
+// リッチメニュー
+export function getRichMenuList(token) {
+  return callLineApi({ token, method: 'GET', endpoint: '/v2/bot/richmenu/list' })
+}
+
+export function getRichMenu(token, richMenuId) {
+  return callLineApi({ token, method: 'GET', endpoint: `/v2/bot/richmenu/${richMenuId}` })
+}
+
+export function createRichMenu(token, menuData) {
+  return callLineApi({ token, method: 'POST', endpoint: '/v2/bot/richmenu', body: menuData })
+}
+
+export function deleteRichMenu(token, richMenuId) {
+  return callLineApi({ token, method: 'DELETE', endpoint: `/v2/bot/richmenu/${richMenuId}` })
+}
+
+export function setDefaultRichMenu(token, richMenuId) {
+  return callLineApi({
+    token,
+    method: 'POST',
+    endpoint: `/v2/bot/user/all/richmenu/${richMenuId}`,
+  })
+}
+
+export function getDefaultRichMenu(token) {
+  return callLineApi({ token, method: 'GET', endpoint: '/v2/bot/user/all/richmenu' })
+}
+
+// ※ リッチメニュー画像アップロード（/v2/bot/richmenu/{id}/content）は
+//    バイナリ送信のため本プロキシでは未対応。別途対応が必要です。
+
+// Insight（統計）
+export function getNumberOfFollowers(token, date) {
+  // date format: yyyyMMdd
+  return callLineApi({ token, method: 'GET', endpoint: `/v2/bot/insight/followers?date=${date}` })
+}
+
+export function getNumberOfMessageDeliveries(token, date) {
+  return callLineApi({
+    token,
+    method: 'GET',
+    endpoint: `/v2/bot/insight/message/delivery?date=${date}`,
+  })
+}

@@ -110,7 +110,7 @@ export default function App() {
             <span className={`text-xs px-2.5 py-1 rounded-full border ${
               mode === 'supabase' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-amber-50 text-amber-700 border-amber-200'
             }`}>
-              {mode === 'supabase' ? 'Supabase接続' : 'デモモード'}
+              {mode === 'supabase' ? 'DB接続' : 'デモモード'}
             </span>
             {/* 接続ステータス */}
             <span

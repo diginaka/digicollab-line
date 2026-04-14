@@ -10,7 +10,7 @@ export default function RichMenus() {
       {/* 自動切替案内 */}
       <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-4">
         <div className="text-sm text-purple-900">
-          <strong>💡 タグベース自動切替:</strong> n8nと連携すると、友だちのタグに応じてリッチメニューを自動切替できます（プロデューサー以上）
+          <strong>💡 タグベース自動切替:</strong> 自動配信連携を有効にすると、友だちのタグに応じてリッチメニューを自動切替できます（プロデューサー以上）
         </div>
       </div>
 

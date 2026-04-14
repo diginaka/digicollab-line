@@ -19,7 +19,7 @@ export default function Settings({ connection, setConnection }) {
       return
     }
     if (!N8N_BASE) {
-      setTestResult({ ok: false, message: 'VITE_N8N_WEBHOOK_BASE が設定されていません。環境変数を確認してください。' })
+      setTestResult({ ok: false, message: '連携サーバーのURLが設定されていません。管理者にお問い合わせください。' })
       return
     }
 
@@ -240,10 +240,10 @@ export default function Settings({ connection, setConnection }) {
         </Field>
       </Section>
 
-      {/* n8n連携 */}
-      <Section icon={Zap} title="n8n Webhook連携">
+      {/* 自動配信連携 */}
+      <Section icon={Zap} title="自動配信連携">
         <p className="text-xs text-slate-500 mb-3">
-          ステップ配信の実行・LINE API中継・リッチメニュー自動切替に使用します。
+          ステップ配信の実行やリッチメニューの自動切替に使用します。
           接続テスト成功時に自動設定されます。
         </p>
         <Field label="Webhook URL">
@@ -251,15 +251,10 @@ export default function Settings({ connection, setConnection }) {
             type="text"
             value={connection.n8nWebhookUrl}
             onChange={(e) => update('n8nWebhookUrl', e.target.value)}
-            placeholder={LINE_EVENTS_WEBHOOK || 'https://n8n.example.com/webhook/...'}
+            placeholder="https://example.com/webhook/..."
             className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-green-500"
           />
         </Field>
-        {N8N_BASE && (
-          <div className="text-xs text-slate-400 mt-1">
-            ベースURL: <code className="text-slate-600">{N8N_BASE}</code>
-          </div>
-        )}
       </Section>
 
       {/* ボット基本設定 */}
