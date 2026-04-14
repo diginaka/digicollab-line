@@ -8,12 +8,22 @@ const N8N_BASE = import.meta.env.VITE_N8N_WEBHOOK_BASE || 'https://n8n.digicolla
 const LINE_EVENTS_WEBHOOK = `${N8N_BASE}/webhook/dc-line-events`
 const LINE_TEST_CONNECTION_URL = `${N8N_BASE}/webhook/dc-line-test-connection`
 
-export default function Settings({ connection, setConnection }) {
+export default function Settings({ connection, setConnection, loading }) {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
   const [copied, setCopied] = useState(false)
 
   const update = (field, value) => setConnection({ ...connection, [field]: value })
+
+  if (loading) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto">
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
+          接続情報を読み込み中...
+        </div>
+      </div>
+    )
+  }
 
   const testConnection = async () => {
     if (!connection.channelAccessToken) {

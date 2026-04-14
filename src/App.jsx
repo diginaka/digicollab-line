@@ -1,7 +1,20 @@
 import { useState, useEffect } from 'react'
 import { LayoutDashboard, Users, Workflow, Send, LayoutGrid, Settings as SettingsIcon, ChevronLeft, ChevronRight, MessageCircle } from 'lucide-react'
-import { localStore, isSupabaseMode } from './lib/supabase'
+import { localStore, isSupabaseMode, supabase } from './lib/supabase'
 import { AIContentCopyBarLine } from './components/AIContentCopyBarLine'
+
+// 空の接続オブジェクト（初期値）
+const EMPTY_CONNECTION = {
+  channelAccessToken: '',
+  botName: '',
+  botIconUrl: '',
+  channelId: '',
+  liffUrl: '',
+  n8nWebhookUrl: '',
+  greetingMessage: 'ようこそ！友だち追加ありがとうございます😊',
+  autoReplyEnabled: true,
+  isConnected: false,
+}
 import Dashboard from './pages/Dashboard'
 import Friends from './pages/Friends'
 import Sequences from './pages/Sequences'
@@ -21,19 +34,67 @@ const NAV = [
 export default function App() {
   const [currentPage, setCurrentPage] = useState('dashboard')
   const [collapsed, setCollapsed] = useState(false)
-  const [connection, setConnection] = useState(() => localStore.get('connection', {
-    channelAccessToken: '',
-    botName: '',
-    botIconUrl: '',
-    liffUrl: '',
-    n8nWebhookUrl: '',
-    greetingMessage: 'ようこそ！友だち追加ありがとうございます😊',
-    autoReplyEnabled: true,
-    isConnected: false,
-  }))
+  // standaloneモード時のみlocalStorageから復元（supabaseモード時は下のeffectでDBから取得）
+  const [connection, setConnection] = useState(() =>
+    isSupabaseMode ? { ...EMPTY_CONNECTION } : localStore.get('connection', EMPTY_CONNECTION)
+  )
+  const [loadingConnection, setLoadingConnection] = useState(isSupabaseMode)
 
+  // 初回マウント時: supabaseモードならログイン中ユーザーのline_connectionsレコードを取得
   useEffect(() => {
-    localStore.set('connection', connection)
+    if (!isSupabaseMode || !supabase) {
+      setLoadingConnection(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data: userData } = await supabase.auth.getUser()
+        const userId = userData?.user?.id
+        if (!userId) {
+          // 未ログイン: 空欄のまま
+          if (!cancelled) setLoadingConnection(false)
+          return
+        }
+        const { data, error } = await supabase
+          .from('line_connections')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle()
+        if (cancelled) return
+        if (error) {
+          console.warn('line_connections取得エラー:', error.message)
+        } else if (data) {
+          // DB値から接続状態を復元（ハードコード値は一切使わない）
+          setConnection({
+            channelAccessToken: data.channel_access_token || '',
+            botName: data.bot_name || '',
+            botIconUrl: data.bot_icon_url || '',
+            channelId: data.channel_id || '',
+            liffUrl: data.liff_url || '',
+            n8nWebhookUrl: data.n8n_webhook_url || '',
+            greetingMessage: data.greeting_message || 'ようこそ！友だち追加ありがとうございます😊',
+            autoReplyEnabled: data.auto_reply_enabled ?? true,
+            isConnected: Boolean(data.is_connected),
+          })
+        }
+        // レコードが無い新規ユーザーはEMPTY_CONNECTIONのまま（空欄表示）
+      } catch (err) {
+        console.warn('接続情報の読み込みに失敗:', err?.message)
+      } finally {
+        if (!cancelled) setLoadingConnection(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // standaloneモード時のみlocalStorageに永続化
+  useEffect(() => {
+    if (!isSupabaseMode) {
+      localStore.set('connection', connection)
+    }
   }, [connection])
 
   const isTokenSet = Boolean(connection.channelAccessToken && connection.isConnected)
@@ -45,7 +106,7 @@ export default function App() {
     sequences: <Sequences isTokenSet={isTokenSet} connection={connection} />,
     broadcasts: <Broadcasts isTokenSet={isTokenSet} connection={connection} />,
     richmenus: <RichMenus isTokenSet={isTokenSet} connection={connection} />,
-    settings: <Settings connection={connection} setConnection={setConnection} />,
+    settings: <Settings connection={connection} setConnection={setConnection} loading={loadingConnection} />,
   }
 
   return (
