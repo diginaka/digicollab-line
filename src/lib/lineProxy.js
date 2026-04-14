@@ -7,17 +7,15 @@
 //   const r = await getFollowers(token)
 //   if (r.success) { ... r.data ... }
 
-const PROXY_BASE = import.meta.env.VITE_N8N_WEBHOOK_BASE || ''
-const PROXY_URL = PROXY_BASE ? `${PROXY_BASE}/webhook/dc-line-proxy` : ''
+// 環境変数が未設定でもデフォルト値で動作するようにハードコード
+const PROXY_BASE = import.meta.env.VITE_N8N_WEBHOOK_BASE || 'https://n8n.digicollabo.com'
+const PROXY_URL = `${PROXY_BASE}/webhook/dc-line-proxy`
 
 /**
  * @param {{ token: string, method: 'GET'|'POST'|'PUT'|'DELETE', endpoint: string, body?: any }} request
  * @returns {Promise<{ success: boolean, data?: any, error?: string }>}
  */
 export async function callLineApi(request) {
-  if (!PROXY_URL) {
-    return { success: false, error: '連携サーバーのURLが未設定です' }
-  }
   try {
     const response = await fetch(PROXY_URL, {
       method: 'POST',

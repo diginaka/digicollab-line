@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { Key, CheckCircle2, XCircle, ExternalLink, Zap, MessageSquare, Info, Copy, Check } from 'lucide-react'
 import { supabase, isSupabaseMode } from '../lib/supabase'
 
-// n8n Webhook Base URL（CORS回避プロキシ）
-const N8N_BASE = import.meta.env.VITE_N8N_WEBHOOK_BASE || ''
-const LINE_EVENTS_WEBHOOK = N8N_BASE ? `${N8N_BASE}/webhook/dc-line-events` : ''
+// 自動配信連携サーバー ベースURL（CORS回避プロキシ）
+// 環境変数が未設定でもデフォルト値で動作するようにハードコード
+const N8N_BASE = import.meta.env.VITE_N8N_WEBHOOK_BASE || 'https://n8n.digicollabo.com'
+const LINE_EVENTS_WEBHOOK = `${N8N_BASE}/webhook/dc-line-events`
+const LINE_TEST_CONNECTION_URL = `${N8N_BASE}/webhook/dc-line-test-connection`
 
 export default function Settings({ connection, setConnection }) {
   const [testing, setTesting] = useState(false)
@@ -18,16 +20,12 @@ export default function Settings({ connection, setConnection }) {
       setTestResult({ ok: false, message: 'Channel Access Tokenを入力してください' })
       return
     }
-    if (!N8N_BASE) {
-      setTestResult({ ok: false, message: '連携サーバーのURLが設定されていません。管理者にお問い合わせください。' })
-      return
-    }
 
     setTesting(true)
     setTestResult(null)
     try {
-      // n8n Webhookプロキシ経由でLINE APIにアクセス（CORS回避）
-      const res = await fetch(`${N8N_BASE}/webhook/dc-line-test-connection`, {
+      // 自動配信連携サーバー経由でLINE APIにアクセス（CORS回避）
+      const res = await fetch(LINE_TEST_CONNECTION_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: connection.channelAccessToken }),
