@@ -59,29 +59,36 @@ export default function Settings({ connection, setConnection, loading }) {
         setConnection(next)
         setTestResult({ ok: true, message: `接続成功！ ${data.botName || 'LINE Bot'}` })
 
-        // Supabaseモード時は line_connections テーブルに保存
-        if (isSupabaseMode && supabase) {
+        // BYOK方式: 認証なしで channel_id をキーに upsert（anon RLS経由）
+        // 既存の line_connections 行があれば更新、無ければ作成
+        if (isSupabaseMode && supabase && data.botId) {
           try {
-            const { data: userData } = await supabase.auth.getUser()
-            const userId = userData?.user?.id
-            if (userId) {
-              await supabase.from('line_connections').upsert(
-                {
-                  user_id: userId,
-                  channel_access_token: connection.channelAccessToken,
-                  channel_id: data.botId || null,
-                  bot_name: data.botName || null,
-                  bot_icon_url: data.pictureUrl || null,
-                  n8n_webhook_url: LINE_EVENTS_WEBHOOK,
-                  is_connected: true,
-                  connected_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                },
-                { onConflict: 'user_id' },
-              )
+            const existing = await supabase
+              .from('line_connections')
+              .select('id')
+              .eq('channel_id', data.botId)
+              .order('updated_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+
+            const payload = {
+              channel_access_token: connection.channelAccessToken,
+              channel_id: data.botId,
+              bot_name: data.botName || null,
+              bot_icon_url: data.pictureUrl || null,
+              n8n_webhook_url: LINE_EVENTS_WEBHOOK,
+              is_connected: true,
+              connected_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }
+
+            if (existing.data?.id) {
+              await supabase.from('line_connections').update(payload).eq('id', existing.data.id)
+            } else {
+              await supabase.from('line_connections').insert(payload)
             }
           } catch (err) {
-            console.warn('Supabase保存エラー（接続テストは成功しています）:', err.message)
+            console.warn('DB保存エラー（接続テストは成功しています）:', err.message)
           }
         }
       } else {
@@ -126,21 +133,16 @@ export default function Settings({ connection, setConnection, loading }) {
     })
     setTestResult(null)
 
-    // Supabaseからも削除
-    if (isSupabaseMode && supabase) {
+    // DBのis_connectedフラグを更新（channel_id基準）
+    if (isSupabaseMode && supabase && connection.channelId) {
       try {
-        const { data: userData } = await supabase.auth.getUser()
-        const userId = userData?.user?.id
-        if (userId) {
-          await supabase
-            .from('line_connections')
-            .update({
-              channel_access_token: '',
-              is_connected: false,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('user_id', userId)
-        }
+        await supabase
+          .from('line_connections')
+          .update({
+            is_connected: false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('channel_id', connection.channelId)
       } catch (err) {
         console.warn('切断時のDB更新エラー:', err.message)
       }

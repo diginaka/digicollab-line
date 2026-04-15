@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Users, Send, Workflow, Calendar, TrendingUp, AlertCircle, ArrowRight } from 'lucide-react'
 import { demoStats, demoSequences, demoBroadcasts } from '../lib/demoData'
 import { getBotInfo, getMessageQuota, getMessageQuotaConsumption, getFollowers } from '../lib/lineProxy'
-import { supabase, isSupabaseMode } from '../lib/supabase'
+import { supabase, isSupabaseMode, resolveConnectionId } from '../lib/supabase'
 
 export default function Dashboard({ isTokenSet, connection, setCurrentPage }) {
   const [stats, setStats] = useState({
@@ -47,12 +47,16 @@ export default function Dashboard({ isTokenSet, connection, setCurrentPage }) {
         })
       } catch {}
 
-      // Supabase: シーケンス / ブロードキャスト
-      if (isSupabaseMode && supabase) {
+      // Supabase: シーケンス / ブロードキャスト（channelIdから解決）
+      if (isSupabaseMode && supabase && connection.channelId) {
         try {
+          const connId = await resolveConnectionId(connection.channelId)
+          if (cancelled) return
+          const seqQuery = supabase.from('line_sequences').select('id, is_active')
+          const bcQuery = supabase.from('line_broadcasts').select('*').order('created_at', { ascending: false }).limit(3)
           const [seqRes, bcRes] = await Promise.all([
-            supabase.from('line_sequences').select('id, is_active'),
-            supabase.from('line_broadcasts').select('*').order('created_at', { ascending: false }).limit(3),
+            connId ? seqQuery.eq('connection_id', connId) : seqQuery,
+            connId ? bcQuery.eq('connection_id', connId) : bcQuery,
           ])
           if (cancelled) return
           if (seqRes.data) {

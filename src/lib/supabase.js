@@ -10,6 +10,20 @@ export const supabase = isSupabaseMode
   ? createClient(url, anonKey)
   : null
 
+// BYOK方式: Supabase Authを使わないため、channel_id から line_connections.id を解決する
+// 呼び出し側は connection.channelId（アプリ内状態）を渡す
+export async function resolveConnectionId(channelId) {
+  if (!supabase || !channelId) return null
+  const { data } = await supabase
+    .from('line_connections')
+    .select('id')
+    .eq('channel_id', channelId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return data?.id || null
+}
+
 // ローカルストレージラッパー（standaloneモード用）
 const LS_PREFIX = 'digicollab_line_'
 

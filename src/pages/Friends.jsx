@@ -6,7 +6,7 @@ import {
 import { demoFriends, getTagColor } from '../lib/demoData'
 import { supabase, isSupabaseMode } from '../lib/supabase'
 
-export default function Friends({ isTokenSet }) {
+export default function Friends({ isTokenSet, connection }) {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all') // all | active | blocked
   const [tagFilter, setTagFilter] = useState('')
@@ -16,36 +16,43 @@ export default function Friends({ isTokenSet }) {
   const [error, setError] = useState(null)
   const [connectionId, setConnectionId] = useState(null)
 
-  // 接続ID取得 + 友だち一覧取得
+  // BYOK方式: 認証なしでアプリ状態の channelId から line_connections.id を解決し、
+  // line_user_tags を取得する（anon RLSポリシー経由）
   const loadFriends = useCallback(async () => {
     if (!isTokenSet) {
       setFriends(demoFriends)
+      setConnectionId(null)
       return
     }
     if (!isSupabaseMode || !supabase) {
       setFriends([])
-      setError('Supabase接続がありません')
+      setError('データベース接続がありません')
+      return
+    }
+    if (!connection?.channelId) {
+      setError('LINE接続がありません。設定画面で接続してください。')
+      setFriends([])
       return
     }
 
     setLoading(true)
     setError(null)
     try {
-      // ログイン中ユーザーの line_connections.id を取得
-      const { data: userData } = await supabase.auth.getUser()
-      const userId = userData?.user?.id
-      if (!userId) {
-        setError('ログインしてください')
-        setFriends([])
-        return
-      }
+      // channel_id から line_connections.id を解決
       const { data: conn, error: connErr } = await supabase
         .from('line_connections')
         .select('id')
-        .eq('user_id', userId)
+        .eq('channel_id', connection.channelId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
         .maybeSingle()
-      if (connErr || !conn) {
-        setError('接続情報が見つかりません。設定画面で接続してください。')
+      if (connErr) {
+        setError(connErr.message)
+        setFriends([])
+        return
+      }
+      if (!conn) {
+        setError('LINE接続情報が見つかりません。設定画面で接続テストを実行してください。')
         setFriends([])
         return
       }
@@ -69,7 +76,7 @@ export default function Friends({ isTokenSet }) {
     } finally {
       setLoading(false)
     }
-  }, [isTokenSet])
+  }, [isTokenSet, connection?.channelId])
 
   useEffect(() => {
     loadFriends()

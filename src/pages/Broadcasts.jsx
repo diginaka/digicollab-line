@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Send, Calendar, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { demoBroadcasts, demoFriends, getTagColor, demoStats } from '../lib/demoData'
 import { sendBroadcast, sendMulticast, getFollowers, getMessageQuota, getMessageQuotaConsumption } from '../lib/lineProxy'
-import { supabase, isSupabaseMode } from '../lib/supabase'
+import { supabase, isSupabaseMode, resolveConnectionId } from '../lib/supabase'
 
 export default function Broadcasts({ isTokenSet, connection }) {
   const [selectedTags, setSelectedTags] = useState([])
@@ -24,14 +24,19 @@ export default function Broadcasts({ isTokenSet, connection }) {
     }
     let cancelled = false
     ;(async () => {
-      // Supabaseから配信履歴取得
-      if (isSupabaseMode && supabase) {
+      // Supabaseから配信履歴取得（channel_idから解決）
+      if (isSupabaseMode && supabase && connection.channelId) {
         try {
-          const { data } = await supabase
+          const connId = await resolveConnectionId(connection.channelId)
+          if (cancelled) return
+          const query = supabase
             .from('line_broadcasts')
             .select('*')
             .order('created_at', { ascending: false })
             .limit(20)
+          const { data } = connId
+            ? await query.eq('connection_id', connId)
+            : await query
           if (!cancelled && data) {
             setBroadcasts(
               data.map((b) => ({
@@ -94,15 +99,11 @@ export default function Broadcasts({ isTokenSet, connection }) {
     setSendResult(null)
     try {
       if (sendMode === 'schedule') {
-        // 予約配信: Supabaseに保存
+        // 予約配信: Supabaseに保存（BYOK方式: channelIdから解決）
         if (isSupabaseMode && supabase) {
-          const { data: userData } = await supabase.auth.getUser()
-          const userId = userData?.user?.id
-          const { data: conn } = userId
-            ? await supabase.from('line_connections').select('id').eq('user_id', userId).maybeSingle()
-            : { data: null }
+          const connId = await resolveConnectionId(connection.channelId)
           const { error } = await supabase.from('line_broadcasts').insert({
-            connection_id: conn?.id || null,
+            connection_id: connId,
             name: `配信 ${new Date().toLocaleString('ja-JP')}`,
             target_tags: selectedTags,
             message_content: message,
@@ -134,15 +135,11 @@ export default function Broadcasts({ isTokenSet, connection }) {
         }
         if (result.success) {
           setSendResult({ ok: true, message: '配信を送信しました' })
-          // Supabase履歴に記録
+          // Supabase履歴に記録（BYOK方式: channelIdから解決）
           if (isSupabaseMode && supabase) {
-            const { data: userData } = await supabase.auth.getUser()
-            const userId = userData?.user?.id
-            const { data: conn } = userId
-              ? await supabase.from('line_connections').select('id').eq('user_id', userId).maybeSingle()
-              : { data: null }
+            const connId = await resolveConnectionId(connection.channelId)
             await supabase.from('line_broadcasts').insert({
-              connection_id: conn?.id || null,
+              connection_id: connId,
               name: `配信 ${new Date().toLocaleString('ja-JP')}`,
               target_tags: selectedTags,
               message_content: message,

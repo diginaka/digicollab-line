@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Plus, Play, Pause, Clock, MessageSquare, Zap, Trash2, Workflow, Loader2 } from 'lucide-react'
 import { demoSequences } from '../lib/demoData'
-import { supabase, isSupabaseMode } from '../lib/supabase'
+import { supabase, isSupabaseMode, resolveConnectionId } from '../lib/supabase'
 
 const TRIGGER_LABELS = {
   friend_added: '友だち追加時',
@@ -10,7 +10,7 @@ const TRIGGER_LABELS = {
   keyword_match: 'キーワード一致',
 }
 
-export default function Sequences({ isTokenSet }) {
+export default function Sequences({ isTokenSet, connection }) {
   const [sequences, setSequences] = useState(isTokenSet ? [] : demoSequences)
   const [selected, setSelected] = useState(isTokenSet ? null : demoSequences[0])
   const [loading, setLoading] = useState(false)
@@ -31,10 +31,16 @@ export default function Sequences({ isTokenSet }) {
     ;(async () => {
       setLoading(true)
       try {
-        const { data: seqData, error } = await supabase
+        // BYOK方式: channelId から connection_id を解決してフィルタ
+        const connId = await resolveConnectionId(connection?.channelId)
+        if (cancelled) return
+        const baseQuery = supabase
           .from('line_sequences')
           .select('*, line_sequence_steps(*)')
           .order('created_at', { ascending: false })
+        const { data: seqData, error } = connId
+          ? await baseQuery.eq('connection_id', connId)
+          : await baseQuery
         if (cancelled || error) return
         const mapped = (seqData || []).map((s) => ({
           id: s.id,
@@ -59,7 +65,7 @@ export default function Sequences({ isTokenSet }) {
     return () => {
       cancelled = true
     }
-  }, [isTokenSet])
+  }, [isTokenSet, connection?.channelId])
 
   const toggle = async (id) => {
     const next = sequences.map((s) => (s.id === id ? { ...s, isActive: !s.isActive } : s))
@@ -78,19 +84,16 @@ export default function Sequences({ isTokenSet }) {
     if (!isTokenSet || !isSupabaseMode || !supabase) return
     const name = window.prompt('新しいシーケンス名を入力してください')
     if (!name) return
-    const { data: userData } = await supabase.auth.getUser()
-    const userId = userData?.user?.id
-    if (!userId) return
-    const { data: conn } = await supabase
-      .from('line_connections')
-      .select('id')
-      .eq('user_id', userId)
-      .maybeSingle()
-    if (!conn) return
+    // BYOK方式: channelIdから line_connections.id を解決
+    const connId = await resolveConnectionId(connection?.channelId)
+    if (!connId) {
+      alert('LINE接続情報が見つかりません。設定画面で接続してください。')
+      return
+    }
     const { data, error } = await supabase
       .from('line_sequences')
       .insert({
-        connection_id: conn.id,
+        connection_id: connId,
         name,
         description: '',
         trigger_type: 'friend_added',
