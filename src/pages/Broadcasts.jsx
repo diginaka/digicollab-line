@@ -14,7 +14,7 @@ export default function Broadcasts({ isTokenSet, connection }) {
   // メッセージ + 設定
   const [message, setMessage] = useState('')
   const [mode, setMode] = useState('broadcast') // 'broadcast' | 'tag' | 'individual'
-  const [selectedTag, setSelectedTag] = useState('')
+  const [selectedTags, setSelectedTags] = useState([]) // タグモードの複数選択
   const [selectedIds, setSelectedIds] = useState([]) // individual時のline_user_id配列
 
   // データ
@@ -116,12 +116,19 @@ export default function Broadcasts({ isTokenSet, connection }) {
 
   const recipientIds = (() => {
     if (mode === 'broadcast') return null // 全員
-    if (mode === 'tag' && selectedTag) {
-      return friends.filter((f) => (f.tags || []).includes(selectedTag)).map((f) => f.line_user_id)
+    if (mode === 'tag' && selectedTags.length > 0) {
+      // 選択タグのいずれかを持つ友だち（OR条件）
+      return friends
+        .filter((f) => (f.tags || []).some((t) => selectedTags.includes(t)))
+        .map((f) => f.line_user_id)
     }
     if (mode === 'individual') return selectedIds
     return []
   })()
+
+  const toggleTag = (tag) => {
+    setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
+  }
 
   const targetCount = mode === 'broadcast' ? friends.length : (recipientIds?.length || 0)
   const remaining = Math.max(0, quota.limit - quota.totalUsage)
@@ -147,7 +154,7 @@ export default function Broadcasts({ isTokenSet, connection }) {
         return mode === 'tag' ? 'タグを選択するか対象がいることを確認してください' : '送信先を1人以上選択してください'
       }
       if (recipientIds.length > MULTICAST_LIMIT) {
-        return `一度に送信できるのは${MULTICAST_LIMIT}人までです。タグで絞り込んでください。`
+        return `一度に送信できるのは${MULTICAST_LIMIT}人までです。さらに絞り込んでください。`
       }
     }
     return null
@@ -189,7 +196,7 @@ export default function Broadcasts({ isTokenSet, connection }) {
             await supabase.from('line_broadcasts').insert({
               connection_id: connectionId,
               name: `配信 ${new Date().toLocaleString('ja-JP')}`,
-              target_tags: mode === 'tag' && selectedTag ? [selectedTag] : [],
+              target_tags: mode === 'tag' ? selectedTags : [],
               message_content: message,
               status: 'sent',
               sent_at: new Date().toISOString(),
@@ -287,18 +294,34 @@ export default function Broadcasts({ isTokenSet, connection }) {
               />
               {mode === 'tag' && (
                 <div className="ml-7">
-                  <select
-                    value={selectedTag}
-                    onChange={(e) => setSelectedTag(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-green-500"
-                  >
-                    <option value="">タグを選択...</option>
-                    {allTags.map((t) => (
-                      <option key={t} value={t}>
-                        {t} ({friends.filter((f) => (f.tags || []).includes(t)).length}人)
-                      </option>
-                    ))}
-                  </select>
+                  {allTags.length === 0 ? (
+                    <div className="text-xs text-slate-400">タグ付きの友だちがいません</div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {allTags.map((t) => {
+                        const active = selectedTags.includes(t)
+                        const count = friends.filter((f) => (f.tags || []).includes(t)).length
+                        return (
+                          <button
+                            key={t}
+                            onClick={() => toggleTag(t)}
+                            className={`text-xs px-3 py-1.5 rounded-full border transition ${
+                              active
+                                ? 'bg-green-500 text-white border-green-500'
+                                : 'bg-white text-slate-700 border-slate-300 hover:border-green-500'
+                            }`}
+                          >
+                            {t} <span className="opacity-70">({count})</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {selectedTags.length > 0 && (
+                    <div className="text-[11px] text-slate-500 mt-1.5">
+                      {selectedTags.length}個のタグを選択中 / 選択タグのいずれかを持つ友だちが対象
+                    </div>
+                  )}
                 </div>
               )}
               <ModeRadio
@@ -497,7 +520,7 @@ export default function Broadcasts({ isTokenSet, connection }) {
                   {mode === 'broadcast'
                     ? `全友だち（${friends.length}人）`
                     : mode === 'tag'
-                      ? `タグ「${selectedTag}」に一致（${targetCount}人）`
+                      ? `タグ「${selectedTags.join(', ')}」に一致（${targetCount}人）`
                       : `個別選択（${targetCount}人）`}
                 </div>
               </div>

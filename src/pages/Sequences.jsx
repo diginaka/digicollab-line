@@ -151,6 +151,35 @@ export default function Sequences({ isTokenSet, connection }) {
     }
   }, [isTokenSet, connectionId])
 
+  // ========== シーケンス削除 ==========
+  const deleteSequence = async (seqId) => {
+    if (!seqId || !isSupabaseMode || !supabase) return
+    if (!window.confirm('このシーケンスを削除しますか？関連するステップと配信キューも削除されます。')) return
+    try {
+      // 1. delivery_queue から pending/paused のみ削除
+      await supabase
+        .from('delivery_queue')
+        .delete()
+        .eq('funnel_id', seqId)
+        .in('status', ['pending', 'paused'])
+      // 2. generated_step_contents を削除
+      await supabase
+        .from('generated_step_contents')
+        .delete()
+        .eq('funnel_id', seqId)
+      // 3. line_sequences を削除
+      const { error: err } = await supabase.from('line_sequences').delete().eq('id', seqId)
+      if (err) throw err
+
+      const nextList = sequences.filter((s) => s.id !== seqId)
+      setSequences(nextList)
+      if (selected?.id === seqId) setSelected(nextList[0] || null)
+      setStartResult({ ok: true, message: 'シーケンスを削除しました' })
+    } catch (err) {
+      setStartResult({ ok: false, message: '削除失敗: ' + (err.message || err) })
+    }
+  }
+
   // ========== シーケンス新規作成 ==========
   const createSequence = async () => {
     if (!isTokenSet || !isSupabaseMode || !supabase) return
@@ -383,26 +412,33 @@ export default function Sequences({ isTokenSet, connection }) {
             )}
 
             {sequences.map((seq) => (
-              <button
+              <div
                 key={seq.id}
                 onClick={() => setSelected(seq)}
-                className={`w-full text-left bg-white rounded-xl border p-4 transition ${
+                className={`w-full text-left bg-white rounded-xl border p-4 transition cursor-pointer ${
                   selected?.id === seq.id ? 'border-green-500 ring-2 ring-green-100' : 'border-slate-200 hover:border-slate-300'
                 }`}
                 data-sequence-card
               >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="font-bold text-slate-800 text-sm">{seq.name}</div>
+                <div className="flex items-start justify-between mb-2 gap-2">
+                  <div className="font-bold text-slate-800 text-sm min-w-0 flex-1 truncate">{seq.name}</div>
                   <span
-                    className={`text-[10px] px-2 py-0.5 rounded-full ${
+                    className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${
                       seq.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
                     }`}
                   >
                     {seq.isActive ? '配信中' : '停止中'}
                   </span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteSequence(seq.id) }}
+                    className="text-slate-400 hover:text-red-500 shrink-0"
+                    title="シーケンスを削除"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
                 <div className="text-xs text-slate-500 truncate">{seq.description || 'ステップ配信'}</div>
-              </button>
+              </div>
             ))}
           </div>
 

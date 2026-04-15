@@ -36,6 +36,31 @@ export async function callLineApi(request) {
   }
 }
 
+// ==== リッチメニュー専用中継 (WF-LINE-RICHMENU) ====
+// POST /webhook/dc-line-richmenu
+// action: list | create | upload_image | set_default | cancel_default | delete
+const RICHMENU_URL = `${PROXY_BASE}/webhook/dc-line-richmenu`
+
+export async function richMenuProxy(connectionId, action, params = {}) {
+  try {
+    const res = await fetch(RICHMENU_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        connection_id: connectionId,
+        action,
+        ...params,
+      }),
+    })
+    if (!res.ok) {
+      return { status: 'failed', error: `HTTP ${res.status}` }
+    }
+    return await res.json()
+  } catch (err) {
+    return { status: 'failed', error: err.message || '通信エラー' }
+  }
+}
+
 // ==== 一斉配信専用中継 (WF-LINE-BROADCAST) ====
 // POST /webhook/dc-line-broadcast
 // n8n側で line_connections からトークン取得 → LINE Broadcast/Multicast API呼出し
