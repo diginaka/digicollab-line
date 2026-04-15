@@ -1,262 +1,387 @@
-import { useState, useEffect } from 'react'
-import { Send, Calendar, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import {
+  Send, Loader2, CheckCircle2, AlertCircle, Users, Tag as TagIcon,
+  CheckSquare, Square, X, Info,
+} from 'lucide-react'
 import { demoBroadcasts, demoFriends, getTagColor, demoStats } from '../lib/demoData'
-import { sendBroadcast, sendMulticast, getFollowers, getMessageQuota, getMessageQuotaConsumption } from '../lib/lineProxy'
+import { sendBroadcastViaProxy, getMessageQuota, getMessageQuotaConsumption } from '../lib/lineProxy'
 import { supabase, isSupabaseMode, resolveConnectionId } from '../lib/supabase'
 
+const LINE_TEXT_LIMIT = 5000
+const MULTICAST_LIMIT = 500
+
 export default function Broadcasts({ isTokenSet, connection }) {
-  const [selectedTags, setSelectedTags] = useState([])
-  const [message, setMessage] = useState('今月限定のお得なキャンペーンのご案内です🎉\n本日よりスタート！')
-  const [sendMode, setSendMode] = useState('now')
-  const [scheduledAt, setScheduledAt] = useState('')
+  // メッセージ + 設定
+  const [message, setMessage] = useState('')
+  const [mode, setMode] = useState('broadcast') // 'broadcast' | 'tag' | 'individual'
+  const [selectedTag, setSelectedTag] = useState('')
+  const [selectedIds, setSelectedIds] = useState([]) // individual時のline_user_id配列
+
+  // データ
+  const [connectionId, setConnectionId] = useState(null)
+  const [friends, setFriends] = useState([])
+  const [broadcasts, setBroadcasts] = useState(isTokenSet ? [] : demoBroadcasts)
+  const [quota, setQuota] = useState({ totalUsage: 0, limit: 0 })
+  const [localLogs, setLocalLogs] = useState([]) // 今セッションの送信ログ
+
+  // UI状態
   const [sending, setSending] = useState(false)
   const [sendResult, setSendResult] = useState(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
 
-  const [broadcasts, setBroadcasts] = useState(isTokenSet ? [] : demoBroadcasts)
-  const [quota, setQuota] = useState({ totalUsage: demoStats.sentThisMonth, limit: demoStats.quota })
-
-  // 配信履歴 + クォータ取得
-  useEffect(() => {
+  // ========== データロード ==========
+  const loadData = useCallback(async () => {
     if (!isTokenSet) {
       setBroadcasts(demoBroadcasts)
+      setFriends(demoFriends.map((f) => ({ ...f, line_user_id: f.userId, is_active: true })))
       setQuota({ totalUsage: demoStats.sentThisMonth, limit: demoStats.quota })
       return
     }
-    let cancelled = false
-    ;(async () => {
-      // Supabaseから配信履歴取得（channel_idから解決）
-      if (isSupabaseMode && supabase && connection.channelId) {
-        try {
-          const connId = await resolveConnectionId(connection.channelId)
-          if (cancelled) return
-          const query = supabase
-            .from('line_broadcasts')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(20)
-          const { data } = connId
-            ? await query.eq('connection_id', connId)
-            : await query
-          if (!cancelled && data) {
-            setBroadcasts(
-              data.map((b) => ({
-                id: b.id,
-                name: b.name,
-                targetTags: b.target_tags || [],
-                messageContent: b.message_content,
-                status: b.status,
-                scheduledAt: b.scheduled_at,
-                sentAt: b.sent_at,
-                totalSent: b.total_sent || 0,
-              })),
-            )
-          }
-        } catch {}
+    if (!isSupabaseMode || !supabase || !connection?.channelId) {
+      setError('LINE接続がありません。設定画面で接続してください。')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const connId = await resolveConnectionId(connection.channelId)
+      if (!connId) {
+        setError('LINE接続情報が見つかりません。設定画面で接続テストを実行してください。')
+        return
       }
-      // クォータ取得（LINE API）
+      setConnectionId(connId)
+
+      // 友だち一覧
+      const { data: friendData } = await supabase
+        .from('line_user_tags')
+        .select('id, line_user_id, tags, email, memo, is_active')
+        .eq('connection_id', connId)
+        .eq('is_active', true)
+        .order('followed_at', { ascending: false })
+      setFriends(friendData || [])
+
+      // 配信履歴
+      const { data: histData } = await supabase
+        .from('line_broadcasts')
+        .select('*')
+        .eq('connection_id', connId)
+        .order('created_at', { ascending: false })
+        .limit(20)
+      setBroadcasts(
+        (histData || []).map((b) => ({
+          id: b.id,
+          name: b.name,
+          targetTags: b.target_tags || [],
+          messageContent: b.message_content,
+          status: b.status,
+          scheduledAt: b.scheduled_at,
+          sentAt: b.sent_at,
+          totalSent: b.total_sent || 0,
+        })),
+      )
+    } catch (err) {
+      setError(err.message || 'データ取得エラー')
+    } finally {
+      setLoading(false)
+    }
+  }, [isTokenSet, connection?.channelId])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  // クォータ（LINE API、別経路）
+  useEffect(() => {
+    if (!isTokenSet || !connection?.channelAccessToken) {
+      setQuota({ totalUsage: demoStats.sentThisMonth, limit: demoStats.quota })
+      return
+    }
+    ;(async () => {
       try {
         const [q, c] = await Promise.all([
           getMessageQuota(connection.channelAccessToken),
           getMessageQuotaConsumption(connection.channelAccessToken),
         ])
-        if (cancelled) return
-        const limit = q.success ? Number(q.data?.value || 0) : demoStats.quota
+        const limit = q.success ? Number(q.data?.value || 0) : 0
         const used = c.success ? Number(c.data?.totalUsage || 0) : 0
         setQuota({ limit, totalUsage: used })
       } catch {}
     })()
-    return () => {
-      cancelled = true
+  }, [isTokenSet, connection?.channelAccessToken])
+
+  // ========== 派生値 ==========
+  const allTags = Array.from(new Set(friends.flatMap((f) => f.tags || [])))
+
+  const recipientIds = (() => {
+    if (mode === 'broadcast') return null // 全員
+    if (mode === 'tag' && selectedTag) {
+      return friends.filter((f) => (f.tags || []).includes(selectedTag)).map((f) => f.line_user_id)
     }
-  }, [isTokenSet, connection.channelAccessToken])
+    if (mode === 'individual') return selectedIds
+    return []
+  })()
 
-  const allTags = isTokenSet
-    ? [] // 実データモードではタグは現状なし（今後対応）
-    : Array.from(new Set(demoFriends.flatMap((f) => f.tags)))
-
-  const targetCount = isTokenSet
-    ? null
-    : demoFriends.filter((f) => !selectedTags.length || f.tags.some((t) => selectedTags.includes(t))).length
-
+  const targetCount = mode === 'broadcast' ? friends.length : (recipientIds?.length || 0)
   const remaining = Math.max(0, quota.limit - quota.totalUsage)
-  const percent = quota.limit > 0 ? (quota.totalUsage / quota.limit) * 100 : 0
+  const quotaPercent = quota.limit > 0 ? (quota.totalUsage / quota.limit) * 100 : 0
 
-  const toggleTag = (t) => {
-    setSelectedTags(selectedTags.includes(t) ? selectedTags.filter((x) => x !== t) : [...selectedTags, t])
+  const toggleIndividual = (lineUserId) => {
+    setSelectedIds((prev) =>
+      prev.includes(lineUserId) ? prev.filter((id) => id !== lineUserId) : [...prev, lineUserId]
+    )
   }
 
-  const handleSend = async () => {
-    if (!message.trim()) {
-      setSendResult({ ok: false, message: 'メッセージを入力してください' })
-      return
-    }
-    if (!isTokenSet) {
-      setSendResult({ ok: false, message: 'LINEに接続してから配信してください' })
-      return
-    }
+  const selectAllFriends = () => setSelectedIds(friends.map((f) => f.line_user_id))
+  const clearSelection = () => setSelectedIds([])
 
+  // ========== 送信バリデーション ==========
+  const validate = () => {
+    if (!message.trim()) return 'メッセージを入力してください'
+    if (message.length > LINE_TEXT_LIMIT) return `メッセージは${LINE_TEXT_LIMIT}文字以内にしてください`
+    if (!isTokenSet) return 'LINEに接続してから配信してください'
+    if (!connectionId) return 'LINE接続情報が見つかりません'
+    if (mode !== 'broadcast') {
+      if (!recipientIds || recipientIds.length === 0) {
+        return mode === 'tag' ? 'タグを選択するか対象がいることを確認してください' : '送信先を1人以上選択してください'
+      }
+      if (recipientIds.length > MULTICAST_LIMIT) {
+        return `一度に送信できるのは${MULTICAST_LIMIT}人までです。タグで絞り込んでください。`
+      }
+    }
+    return null
+  }
+
+  // ========== 確認ダイアログ → 送信 ==========
+  const openConfirm = () => {
+    setSendResult(null)
+    const err = validate()
+    if (err) {
+      setSendResult({ ok: false, message: err })
+      return
+    }
+    setConfirmOpen(true)
+  }
+
+  const doSend = async () => {
+    setConfirmOpen(false)
     setSending(true)
     setSendResult(null)
     try {
-      if (sendMode === 'schedule') {
-        // 予約配信: Supabaseに保存（BYOK方式: channelIdから解決）
-        if (isSupabaseMode && supabase) {
-          const connId = await resolveConnectionId(connection.channelId)
-          const { error } = await supabase.from('line_broadcasts').insert({
-            connection_id: connId,
-            name: `配信 ${new Date().toLocaleString('ja-JP')}`,
-            target_tags: selectedTags,
-            message_content: message,
-            status: 'scheduled',
-            scheduled_at: scheduledAt || null,
-          })
-          if (error) throw new Error(error.message)
-          setSendResult({ ok: true, message: '予約配信を登録しました' })
-        } else {
-          setSendResult({ ok: false, message: '予約配信にはDB接続が必要です' })
-        }
-      } else {
-        // 今すぐ配信: LINE API直接
-        const messages = [{ type: 'text', text: message }]
-        let result
-        if (selectedTags.length === 0) {
-          // 全員にブロードキャスト
-          result = await sendBroadcast(connection.channelAccessToken, messages)
-        } else {
-          // タグ絞り込み: 実データモードではタグ管理は未実装のためフォロワー全員取得
-          const idsResult = await getFollowers(connection.channelAccessToken)
-          const userIds = idsResult.success ? idsResult.data?.userIds || [] : []
-          if (userIds.length === 0) {
-            setSendResult({ ok: false, message: '配信対象の友だちがいません' })
-            setSending(false)
-            return
-          }
-          result = await sendMulticast(connection.channelAccessToken, userIds.slice(0, 500), messages)
-        }
-        if (result.success) {
-          setSendResult({ ok: true, message: '配信を送信しました' })
-          // Supabase履歴に記録（BYOK方式: channelIdから解決）
-          if (isSupabaseMode && supabase) {
-            const connId = await resolveConnectionId(connection.channelId)
+      const result = await sendBroadcastViaProxy({
+        connectionId,
+        message,
+        broadcast: mode === 'broadcast',
+        recipients: mode === 'broadcast' ? undefined : recipientIds,
+      })
+
+      if (result.status === 'sent') {
+        const countLabel =
+          result.type === 'broadcast' || mode === 'broadcast'
+            ? '全友だち'
+            : `${result.recipientCount || recipientIds.length}人`
+        setSendResult({ ok: true, message: `${countLabel}に送信しました！` })
+
+        // Supabase履歴に記録
+        if (isSupabaseMode && supabase && connectionId) {
+          try {
             await supabase.from('line_broadcasts').insert({
-              connection_id: connId,
+              connection_id: connectionId,
               name: `配信 ${new Date().toLocaleString('ja-JP')}`,
-              target_tags: selectedTags,
+              target_tags: mode === 'tag' && selectedTag ? [selectedTag] : [],
               message_content: message,
               status: 'sent',
               sent_at: new Date().toISOString(),
+              total_sent:
+                typeof result.recipientCount === 'number'
+                  ? result.recipientCount
+                  : mode === 'broadcast'
+                    ? friends.length
+                    : recipientIds.length,
             })
-          }
-        } else {
-          setSendResult({ ok: false, message: result.error || '配信に失敗しました' })
+          } catch {}
+          loadData()
         }
+
+        // ローカルログ
+        setLocalLogs((prev) => [
+          {
+            id: Date.now(),
+            sent_at: new Date().toISOString(),
+            type: result.type || (mode === 'broadcast' ? 'broadcast' : 'multicast'),
+            recipientCount: result.recipientCount || targetCount,
+            message: message.length > 50 ? message.slice(0, 50) + '...' : message,
+            status: 'sent',
+          },
+          ...prev,
+        ])
+
+        // 入力クリア
+        setMessage('')
+        setSelectedIds([])
+      } else {
+        setSendResult({ ok: false, message: `送信失敗: ${result.error || '不明なエラー'}` })
       }
     } catch (err) {
-      setSendResult({ ok: false, message: err.message || '配信エラー' })
+      setSendResult({ ok: false, message: `通信エラー: ${err.message || err}` })
     } finally {
       setSending(false)
     }
   }
 
+  // ========== レンダリング ==========
   return (
     <div className="p-6 max-w-7xl mx-auto" data-page="broadcasts">
-      {/* 残数バー */}
+      {/* エラー */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 mb-4">{error}</div>
+      )}
+
+      {/* クォータバー */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div className="flex items-center justify-between mb-2">
           <div className="text-sm font-bold text-slate-700">LINEメッセージ配信枠</div>
           <div className="text-sm text-slate-600">
-            {quota.totalUsage} / {quota.limit}通 (残り{remaining}通)
+            {quota.totalUsage} / {quota.limit || '-'}通 (残り{remaining}通)
           </div>
         </div>
         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-          <div className="h-full transition-all" style={{ width: `${Math.min(100, percent)}%`, backgroundColor: percent > 80 ? '#ef4444' : '#06C755' }} />
+          <div
+            className="h-full transition-all"
+            style={{
+              width: `${Math.min(100, quotaPercent)}%`,
+              backgroundColor: quotaPercent > 80 ? '#ef4444' : '#06C755',
+            }}
+          />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 配信作成 */}
         <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5" data-broadcast-create>
-          <h3 className="font-bold text-slate-800 mb-4">新しい配信を作成</h3>
+          <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <Send className="w-4 h-4" style={{ color: '#06C755' }} /> 新しい配信を作成
+          </h3>
 
-          {isTokenSet && allTags.length === 0 ? (
-            <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-              現在は全友だちへのブロードキャスト配信のみサポートしています。タグ絞り込みは今後対応予定です。
-            </div>
-          ) : (
-            <div className="mb-4">
-              <label className="block text-xs font-bold text-slate-600 mb-2">対象タグ</label>
-              <div className="flex flex-wrap gap-2">
-                {allTags.map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => toggleTag(t)}
-                    className={`text-xs px-3 py-1.5 rounded-full border transition ${
-                      selectedTags.includes(t) ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-200 text-slate-600 hover:border-slate-300'
-                    }`}
+          {/* 配信モード */}
+          <div className="mb-4">
+            <label className="block text-xs font-bold text-slate-600 mb-2">配信対象</label>
+            <div className="space-y-2">
+              <ModeRadio
+                checked={mode === 'broadcast'}
+                onChange={() => setMode('broadcast')}
+                icon={Users}
+                color="#3b82f6"
+                label="全友だちに配信"
+                desc={`Broadcast API・対象${friends.length}人`}
+              />
+              <ModeRadio
+                checked={mode === 'tag'}
+                onChange={() => setMode('tag')}
+                icon={TagIcon}
+                color="#06C755"
+                label="タグで絞り込み配信"
+                desc="Multicast API・タグを持つ友だちのみ"
+                disabled={allTags.length === 0}
+              />
+              {mode === 'tag' && (
+                <div className="ml-7">
+                  <select
+                    value={selectedTag}
+                    onChange={(e) => setSelectedTag(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-green-500"
                   >
-                    {t}
-                  </button>
-                ))}
-              </div>
-              {targetCount !== null && (
-                <div className="text-xs text-slate-500 mt-2">対象: 約{targetCount}人</div>
+                    <option value="">タグを選択...</option>
+                    {allTags.map((t) => (
+                      <option key={t} value={t}>
+                        {t} ({friends.filter((f) => (f.tags || []).includes(t)).length}人)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <ModeRadio
+                checked={mode === 'individual'}
+                onChange={() => setMode('individual')}
+                icon={CheckSquare}
+                color="#f59e0b"
+                label="個別選択配信"
+                desc="Multicast API・チェックで選択"
+              />
+              {mode === 'individual' && (
+                <div className="ml-7 border border-slate-200 rounded-lg p-3 bg-slate-50">
+                  <div className="flex items-center justify-between mb-2 text-xs">
+                    <div className="text-slate-600">
+                      {selectedIds.length}人 / {friends.length}人選択中
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={selectAllFriends} className="text-blue-600 hover:underline">全選択</button>
+                      <button onClick={clearSelection} className="text-slate-500 hover:underline">クリア</button>
+                    </div>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto space-y-1">
+                    {friends.length === 0 && (
+                      <div className="text-xs text-slate-400 text-center py-4">友だちがいません</div>
+                    )}
+                    {friends.map((f) => {
+                      const checked = selectedIds.includes(f.line_user_id)
+                      return (
+                        <label
+                          key={f.id || f.line_user_id}
+                          className="flex items-center gap-2 px-2 py-1 rounded hover:bg-white cursor-pointer text-xs"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleIndividual(f.line_user_id)}
+                            className="w-3 h-3"
+                          />
+                          <span className="font-mono text-slate-700 truncate flex-1">
+                            {f.line_user_id}
+                          </span>
+                          {f.email && <span className="text-slate-500 truncate max-w-[100px]">{f.email}</span>}
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
               )}
             </div>
-          )}
+            <div className="text-xs text-slate-500 mt-2 flex items-center gap-1">
+              <Info className="w-3 h-3" /> 配信予定: <strong>{mode === 'broadcast' ? `全友だち（${friends.length}人）` : `${targetCount}人`}</strong>
+              {mode !== 'broadcast' && targetCount > MULTICAST_LIMIT && (
+                <span className="text-red-600 ml-2">※ {MULTICAST_LIMIT}人を超えています</span>
+              )}
+            </div>
+          </div>
 
+          {/* メッセージ */}
           <div className="mb-4">
             <label className="block text-xs font-bold text-slate-600 mb-2">メッセージ本文</label>
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              rows={5}
+              rows={6}
+              placeholder="送信するメッセージを入力..."
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-green-500 resize-none"
             />
-            <div className="text-xs text-slate-400 mt-1">{message.length}/500文字</div>
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-xs font-bold text-slate-600 mb-2">配信タイミング</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSendMode('now')}
-                className={`flex-1 py-2 rounded-lg text-sm border transition ${
-                  sendMode === 'now' ? 'border-green-500 bg-green-50 text-green-700 font-bold' : 'border-slate-200 text-slate-600'
-                }`}
-              >
-                今すぐ配信
-              </button>
-              <button
-                onClick={() => setSendMode('schedule')}
-                className={`flex-1 py-2 rounded-lg text-sm border transition ${
-                  sendMode === 'schedule' ? 'border-green-500 bg-green-50 text-green-700 font-bold' : 'border-slate-200 text-slate-600'
-                }`}
-              >
-                予約配信
-              </button>
+            <div className={`text-xs mt-1 ${message.length > LINE_TEXT_LIMIT ? 'text-red-600' : 'text-slate-400'}`}>
+              {message.length}/{LINE_TEXT_LIMIT.toLocaleString()}文字
             </div>
-            {sendMode === 'schedule' && (
-              <input
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
-                className="mt-2 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-              />
-            )}
           </div>
 
+          {/* 送信ボタン */}
           <button
-            onClick={handleSend}
+            onClick={openConfirm}
             disabled={sending || !isTokenSet}
             className="w-full py-3 rounded-lg text-white font-bold flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: '#06C755' }}
           >
             {sending ? (
               <><Loader2 className="w-4 h-4 animate-spin" /> 送信中...</>
-            ) : sendMode === 'now' ? (
-              <><Send className="w-4 h-4" /> 今すぐ配信する</>
             ) : (
-              <><Calendar className="w-4 h-4" /> 予約を登録</>
+              <><Send className="w-4 h-4" /> 送信する</>
             )}
           </button>
 
@@ -281,10 +406,18 @@ export default function Broadcasts({ isTokenSet, connection }) {
           <h3 className="font-bold text-slate-800 mb-4 text-sm">プレビュー</h3>
           <div className="line-chat-bg rounded-xl p-4 min-h-[300px]">
             <div className="flex gap-2 items-start">
-              <div className="w-8 h-8 rounded-full bg-white/80 shrink-0" />
+              {connection?.botIconUrl ? (
+                <img src={connection.botIconUrl} alt="" className="w-8 h-8 rounded-full shrink-0" />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-white/80 shrink-0" />
+              )}
               <div>
-                <div className="text-[10px] text-white/90 mb-1 ml-1">{connection.botName || 'あなたの公式アカウント'}</div>
-                <div className="line-bubble">{message || 'メッセージ本文がここに表示されます'}</div>
+                <div className="text-[10px] text-white/90 mb-1 ml-1">
+                  {connection?.botName || 'あなたの公式アカウント'}
+                </div>
+                <div className="line-bubble">
+                  {message || 'メッセージ本文がここに表示されます'}
+                </div>
               </div>
             </div>
           </div>
@@ -294,16 +427,33 @@ export default function Broadcasts({ isTokenSet, connection }) {
       {/* 配信履歴 */}
       <div className="mt-6 bg-white rounded-xl border border-slate-200 p-5">
         <h3 className="font-bold text-slate-800 mb-3">配信履歴</h3>
-        {broadcasts.length === 0 ? (
-          <div className="text-center py-8 text-sm text-slate-400">
-            配信履歴はまだありません
+
+        {localLogs.length > 0 && (
+          <div className="mb-3 space-y-1">
+            {localLogs.map((l) => (
+              <div key={l.id} className="flex items-center gap-2 text-xs p-2 rounded-lg bg-green-50 border border-green-200">
+                <CheckCircle2 className="w-3 h-3 text-green-600 shrink-0" />
+                <span className="text-slate-700 truncate flex-1">{l.message}</span>
+                <span className="text-slate-500 shrink-0">
+                  {l.type === 'broadcast' ? '全員' : `${l.recipientCount}人`}
+                </span>
+                <span className="text-slate-400 shrink-0">
+                  {new Date(l.sent_at).toLocaleTimeString('ja-JP')}
+                </span>
+              </div>
+            ))}
           </div>
+        )}
+
+        {broadcasts.length === 0 && localLogs.length === 0 ? (
+          <div className="text-center py-8 text-sm text-slate-400">配信履歴はまだありません</div>
         ) : (
           <div className="space-y-2">
             {broadcasts.map((b) => (
               <div key={b.id} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50 border border-slate-100">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-bold text-slate-800 truncate">{b.name}</div>
+                  <div className="text-xs text-slate-500 truncate mt-0.5">{b.messageContent}</div>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     {(b.targetTags || []).map((t) => (
                       <span key={t} className={`text-[10px] px-2 py-0.5 rounded-full border ${getTagColor(t)}`}>{t}</span>
@@ -326,6 +476,93 @@ export default function Broadcasts({ isTokenSet, connection }) {
           </div>
         )}
       </div>
+
+      {/* 送信確認ダイアログ */}
+      {confirmOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setConfirmOpen(false)}>
+          <div className="bg-white rounded-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4">
+              <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                <Send className="w-5 h-5" style={{ color: '#06C755' }} /> 一斉配信の確認
+              </h3>
+              <button onClick={() => setConfirmOpen(false)}>
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
+
+            <div className="space-y-3 mb-5">
+              <div className="bg-slate-50 rounded-lg p-3">
+                <div className="text-xs font-bold text-slate-600 mb-1">対象</div>
+                <div className="text-sm text-slate-800">
+                  {mode === 'broadcast'
+                    ? `全友だち（${friends.length}人）`
+                    : mode === 'tag'
+                      ? `タグ「${selectedTag}」に一致（${targetCount}人）`
+                      : `個別選択（${targetCount}人）`}
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3">
+                <div className="text-xs font-bold text-slate-600 mb-1">メッセージ</div>
+                <div className="text-sm text-slate-800 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                  {message}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800 mb-4 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div>送信すると取り消しできません。内容に問題がないかご確認ください。</div>
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmOpen(false)}
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-bold hover:bg-slate-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={doSend}
+                className="px-5 py-2 text-white rounded-lg text-sm font-bold hover:opacity-90 flex items-center gap-1.5"
+                style={{ backgroundColor: '#06C755' }}
+              >
+                <Send className="w-4 h-4" /> 送信する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="fixed bottom-4 right-4 bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center gap-2 shadow">
+          <Loader2 className="w-3 h-3 animate-spin" /> 読み込み中...
+        </div>
+      )}
     </div>
+  )
+}
+
+function ModeRadio({ checked, onChange, icon: Icon, color, label, desc, disabled }) {
+  return (
+    <label
+      className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition ${
+        checked ? 'border-green-500 bg-green-50' : 'border-slate-200 hover:border-slate-300'
+      } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+    >
+      <input
+        type="radio"
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        className="w-4 h-4 shrink-0"
+      />
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}15` }}>
+        <Icon className="w-4 h-4" style={{ color }} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-bold text-slate-800">{label}</div>
+        <div className="text-[10px] text-slate-500">{desc}</div>
+      </div>
+    </label>
   )
 }

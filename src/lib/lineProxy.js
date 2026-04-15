@@ -36,6 +36,39 @@ export async function callLineApi(request) {
   }
 }
 
+// ==== 一斉配信専用中継 (WF-LINE-BROADCAST) ====
+// POST /webhook/dc-line-broadcast
+// n8n側で line_connections からトークン取得 → LINE Broadcast/Multicast API呼出し
+const BROADCAST_URL = `${PROXY_BASE}/webhook/dc-line-broadcast`
+
+/**
+ * @param {{ connectionId: string, message: string, broadcast: boolean, recipients?: string[] }} params
+ * @returns {Promise<{ status: 'sent'|'failed', type: string, recipientCount: number|string, httpStatus?: number, error?: string }>}
+ */
+export async function sendBroadcastViaProxy({ connectionId, message, broadcast, recipients }) {
+  try {
+    const payload = {
+      connection_id: connectionId,
+      message,
+      broadcast: Boolean(broadcast),
+    }
+    if (!broadcast) {
+      payload.recipients = recipients || []
+    }
+    const res = await fetch(BROADCAST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      return { status: 'failed', error: `HTTP ${res.status}` }
+    }
+    return await res.json()
+  } catch (err) {
+    return { status: 'failed', error: err.message || '通信エラー' }
+  }
+}
+
 // ==== 便利関数 ====
 
 export function getBotInfo(token) {
