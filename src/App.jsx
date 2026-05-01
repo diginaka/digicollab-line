@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, Users, Workflow, Send, LayoutGrid, Settings as SettingsIcon, ChevronLeft, ChevronRight, MessageCircle } from 'lucide-react'
+import { LayoutDashboard, Users, Workflow, Send, LayoutGrid, Settings as SettingsIcon, ChevronLeft, ChevronRight, MessageCircle, MessageSquare } from 'lucide-react'
 import { localStore, isSupabaseMode, supabase } from './lib/supabase'
 import { initSSO } from './lib/initSSO'
 import { AIContentCopyBarLine } from './components/AIContentCopyBarLine'
 import Dashboard from './pages/Dashboard'
 import Friends from './pages/Friends'
+import Messages from './pages/Messages'
 import Sequences from './pages/Sequences'
 import Broadcasts from './pages/Broadcasts'
 import RichMenus from './pages/RichMenus'
@@ -26,6 +27,7 @@ const EMPTY_CONNECTION = {
 const NAV = [
   { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
   { id: 'friends', label: '友だち管理', icon: Users },
+  { id: 'messages', label: 'メッセージ', icon: MessageSquare },
   { id: 'sequences', label: 'ステップ配信', icon: Workflow },
   { id: 'broadcasts', label: '一斉配信', icon: Send },
   { id: 'richmenus', label: 'リッチメニュー', icon: LayoutGrid },
@@ -115,6 +117,7 @@ export default function App() {
   const pages = {
     dashboard: <Dashboard isTokenSet={isTokenSet} connection={connection} setCurrentPage={setCurrentPage} />,
     friends: <Friends isTokenSet={isTokenSet} connection={connection} />,
+    messages: <Messages isTokenSet={isTokenSet} connection={connection} />,
     sequences: <Sequences isTokenSet={isTokenSet} connection={connection} />,
     broadcasts: <Broadcasts isTokenSet={isTokenSet} connection={connection} />,
     richmenus: <RichMenus isTokenSet={isTokenSet} connection={connection} />,
