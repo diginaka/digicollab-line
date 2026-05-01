@@ -1,0 +1,81 @@
+{
+  "_meta": {
+    "savedAt": "2026-05-02",
+    "purpose": "post-expansion snapshot — 機能③ リッチメニュー個別切替 統合完了",
+    "expandedNodeCount": 23,
+    "originalNodeCount": 13,
+    "addedNodeCount": 10,
+    "modifiedNodeCount": 2,
+    "workflowId": "QvjtVzobntX7xr4W",
+    "validation": {
+      "valid": true,
+      "errorCount": 0,
+      "warningCount": 39,
+      "validConnections": 33,
+      "expressionsValidated": 30,
+      "warningsNote": "全 39 件は cosmetic (typeVersion 古め / outputKey property 欠落 / linear chain 警告 / HTTP error handling 推奨等)、機能影響なし"
+    },
+    "topologySummary": {
+      "trigger": "Webhook受信 → バリデーション → トークン取得 → トークン確認 → アクション分岐 (9 cases)",
+      "directPaths": [
+        "[0] list → リッチメニュー一覧取得 → 成功レスポンス → レスポンス返却",
+        "[1] create → リッチメニュー作成 → 成功レスポンス → レスポンス返却",
+        "[2] upload_image → リッチメニュー画像アップロード → 成功レスポンス → レスポンス返却",
+        "[3] set_default → デフォルト設定 → 成功レスポンス → レスポンス返却",
+        "[4] cancel_default → デフォルト解除 → 成功レスポンス → レスポンス返却",
+        "[5] delete → リッチメニュー削除 → 成功レスポンス → レスポンス返却",
+        "[6] link_user → 個別リッチメニュー link → (success: link 完了データ整形 / error: 失敗データ整形) → 完了通知 RPC → 成功レスポンス → レスポンス返却",
+        "[7] unlink_user → 個別リッチメニュー unlink → (success: unlink 完了データ整形 / error: 失敗データ整形) → 完了通知 RPC → 成功レスポンス → レスポンス返却",
+        "[8] refresh_user_link → refresh: tags 取得 → refresh: menus 取得 → refresh: マッチング判定 → refresh: 分岐 → (link / unlink branch → 上記の link/unlink user 経路へ合流)"
+      ]
+    },
+    "newNodes": [
+      "rm-link-user (個別リッチメニュー link, HTTP POST)",
+      "rm-unlink-user (個別リッチメニュー unlink, HTTP DELETE)",
+      "rm-prep-link-success (link 完了データ整形, Code, try-catch で direct/refresh から rich_menu_pk_id を取得)",
+      "rm-prep-unlink-success (unlink 完了データ整形, Code)",
+      "rm-prep-fail (失敗データ整形, Code, link/unlink エラー両対応)",
+      "rm-complete-rpc (完了通知 RPC, HTTP POST → complete_richmenu_link)",
+      "rm-refresh-fetch-tags (refresh: tags 取得, HTTP GET → line_user_tags)",
+      "rm-refresh-fetch-menus (refresh: menus 取得, HTTP GET → line_rich_menus)",
+      "rm-refresh-resolve (refresh: マッチング判定, Code, target_tags OR マッチ + priority DESC)",
+      "rm-resolved-switch (refresh: 分岐, Switch on resolvedAction = link / unlink)"
+    ],
+    "modifiedNodes": [
+      "rm-validate (validActions に 3 アクション追加 + line_user_id/link_record_id/rich_menu_pk_id/source を出力に追加)",
+      "rm-switch (6 cases → 9 cases に拡張)"
+    ],
+    "designNotes": [
+      "教訓① 遵守: Code ノードで $env.X を一切使わず、Supabase 認証は HTTP Request + Header Auth credential (id ggbicx9TBJ3h1T5T) で済ませる",
+      "教訓② 遵守: 外部 HTTP は HTTP Request ノード経由、Code ノードは入出力 transform に限定 (例外: 既存 rm-upload は this.helpers.httpRequest を継続使用)",
+      "教訓③ 遵守: refresh path のみ実行される refresh: マッチング判定 への参照は link 完了データ整形 内で try/catch でガード",
+      "教訓④ 遵守: complete_richmenu_link は line_user_richmenu_links の partial unique 制約を 2 ステップ (既存 linked → unlinked 降格 → 対象 row UPDATE) で処理",
+      "教訓⑤ 遵守: complete_richmenu_link RPC は RETURNS void (機能② append_line_message_from_delivery と同パターン)",
+      "教訓⑥ 遵守: link/unlink/refresh の完了後に必ず complete_richmenu_link を呼び line_user_richmenu_links.status を更新 (友だち詳細画面の表示連動を担保)",
+      "教訓⑦ 遵守: 着手前 backup を wf-line-richmenu-2026-05-02-pre-individual-link.json に保存済"
+    ],
+    "knownWarnings": [
+      "Switch typeVersion: 3 (latest 3.4) — cosmetic, 機能影響なし、Phase 2 で更新検討",
+      "HTTP Request nodes without onError — Phase 2 で retryOnFail / continueRegularOutput 検討",
+      "Long linear chain (14 nodes) — 設計上意図したもの、サブワークフロー化は Phase 2 で検討",
+      "Switch rules missing outputKey — n8n 内部の自動生成領域、設定に影響なし"
+    ],
+    "credentials": {
+      "httpHeaderAuthSupabase": "ggbicx9TBJ3h1T5T (Supabase Header Auth)"
+    },
+    "endpoints": {
+      "webhook": "https://n8n.digicollabo.com/webhook/dc-line-richmenu",
+      "lineLink": "POST https://api.line.me/v2/bot/user/{userId}/richmenu/{richMenuId}",
+      "lineUnlink": "DELETE https://api.line.me/v2/bot/user/{userId}/richmenu",
+      "supabaseRpcComplete": "POST https://whpqheywobndaeaikchh.supabase.co/rest/v1/rpc/complete_richmenu_link",
+      "supabaseQueryTags": "GET https://whpqheywobndaeaikchh.supabase.co/rest/v1/line_user_tags?...",
+      "supabaseQueryMenus": "GET https://whpqheywobndaeaikchh.supabase.co/rest/v1/line_rich_menus?..."
+    }
+  },
+  "id": "QvjtVzobntX7xr4W",
+  "name": "WF-LINE-RICHMENU: リッチメニュー管理中継",
+  "active": true,
+  "nodeCount": 23,
+  "actions": ["list", "create", "upload_image", "set_default", "cancel_default", "delete", "link_user", "unlink_user", "refresh_user_link"],
+  "structureNote": "詳細な node parameters は n8n の version history (versionId: post-2026-05-02-expansion) を参照。本ファイルはトポロジ + 設計意図のサマリ。"
+}
