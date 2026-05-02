@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* Phase 2-A 5 色トークン (digicollab-flow-builder と統一、ホワイトラベル化用) */
+@theme {
+  --color-digi-green: #1B6B3A;
+  --color-digi-green-light: #2D9B5E;
+  --color-digi-green-dark: #144D2A;
+  --color-digi-bg: #F8FAF9;
+  --color-digi-border: #E3EBE6;
+  --color-digi-text: #1A2A20;
+  --color-digi-text-muted: #5E6B64;
+  --color-digi-sidebar: #1A2A20;
+}
+
 :root {
   font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -11,8 +23,8 @@ html, body, #root {
   overflow: hidden;
   margin: 0;
   padding: 0;
-  background-color: #f8fafb;
-  color: #1e293b;
+  background-color: var(--color-digi-bg);
+  color: var(--color-digi-text);
 }
 
 .app-container {
