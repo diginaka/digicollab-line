@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import { demoSequences } from '../lib/demoData'
 import { supabase, isSupabaseMode, resolveConnectionId } from '../lib/supabase'
+import { useFlowContext } from '../hooks/useFlowContext'
+import EmbeddedDraftView from '../components/EmbeddedDraftView'
 
 const SEND_TIME_OPTIONS = [
   { value: '09:00', label: '午前9時（JST）' },
@@ -13,7 +15,23 @@ const SEND_TIME_OPTIONS = [
   { value: 'custom', label: 'カスタム時刻' },
 ]
 
-export default function Sequences({ isTokenSet, connection }) {
+// Phase A.6 (2026-05-02): フロービルダー iframe 埋め込みモード分岐ラッパ。
+// ?embed=true&funnel_id=xxx で起動された場合は、AI 一括生成された下書き 5 通を
+// 表示する専用 view を返す。standalone モード (line_sequences 一覧 + 配信開始
+// フォーム + 友だちタグフィルタ) は SequencesStandalone として完全に温存し、
+// 本ラッパはそれに干渉しない。
+//
+// 注: Wrapper 側で early return しているため、Standalone 側の hooks 呼び出し順序は
+// 影響を受けない (React Rules of Hooks 遵守)。
+export default function Sequences(props) {
+  const { funnelId, isEmbedded } = useFlowContext()
+  if (isEmbedded && funnelId) {
+    return <EmbeddedDraftView funnelId={funnelId} />
+  }
+  return <SequencesStandalone {...props} />
+}
+
+function SequencesStandalone({ isTokenSet, connection }) {
   // シーケンス一覧
   const [sequences, setSequences] = useState(isTokenSet ? [] : demoSequences)
   const [selected, setSelected] = useState(isTokenSet ? null : demoSequences[0])
