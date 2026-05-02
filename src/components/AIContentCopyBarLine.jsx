@@ -10,10 +10,8 @@ export function AIContentCopyBarLine() {
   const [selectedIndex, setSelectedIndex] = useState(-1)
   const [copied, setCopied] = useState(false)
 
-  if (!isEmbedded || contents.length === 0) return null
-
-  const selected = selectedIndex >= 0 ? contents[selectedIndex] : null
-
+  // Hooks must be declared before any early return so the call order stays
+  // stable across renders (React rules-of-hooks).
   const handleCopy = useCallback(async (text) => {
     try {
       await navigator.clipboard.writeText(text)
@@ -33,6 +31,10 @@ export function AIContentCopyBarLine() {
       setTimeout(() => setCopied(false), 2000)
     }
   }, [])
+
+  if (!isEmbedded || contents.length === 0) return null
+
+  const selected = selectedIndex >= 0 ? contents[selectedIndex] : null
 
   if (loading) {
     return (
