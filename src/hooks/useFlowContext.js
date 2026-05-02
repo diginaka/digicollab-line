@@ -13,8 +13,10 @@ export function useFlowContext() {
     const embedded = window !== window.top
 
     // URLパラメータからfunnelIdを取得
+    // フロービルダー本体 (digicollab-flow-builder) は snake_case `funnel_id` で渡す
+    // (src/lib/externalAppUrl.ts buildIframeUrl)。後方互換のため camelCase も維持。
     const params = new URLSearchParams(window.location.search)
-    const funnelIdFromUrl = params.get('funnelId')
+    const funnelIdFromUrl = params.get('funnel_id') || params.get('funnelId')
 
     if (funnelIdFromUrl) {
       setContext({ funnelId: funnelIdFromUrl, isEmbedded: embedded })
