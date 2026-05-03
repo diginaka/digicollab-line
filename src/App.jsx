@@ -15,12 +15,11 @@ import Broadcasts from './pages/Broadcasts'
 import RichMenus from './pages/RichMenus'
 import Settings from './pages/Settings'
 
-// Phase B.7.3 v2 (2026-05-03): Phase B 拡張版 PR #4 で巻き添え削除された
-// 機能① (Messages.jsx) + 機能③ (RichMenus.jsx) + Settings / Friends / Dashboard /
-// Broadcasts を完全復元。Phase B.7.3 PR #7 (応急処置 placeholder NAV) は close 予定。
-// PR #7 で追加した細サイドバー (w-14) / state ベース view 切替 / ホワイトラベル化 /
-// AIContentCopyBarLine 条件付き表示 の改善は維持して統合。
-// embed mode (flow-builder iframe 内) では NAV 非表示で Sequences のみ描画 (案 A)。
+// Phase B.7.4 (2026-05-04): embed mode (flow-builder iframe 内) でも NAV 表示 =
+// mail iframe と完全並列構成。Phase B.7.3 v2 起動プロンプトの「案 A: embed では
+// NAV 非表示」判断は達也さんビジョン (mail と並列) と不整合だったため案 B に修正。
+// 初期ページは embed なら 'sequences' (フロービルダー ℹ️ タブからの想定遷移先)、
+// standalone なら 'dashboard'。useFlowContext 検出は initialPage 振り分けに使用。
 const EMPTY_CONNECTION = {
   channelAccessToken: '',
   botName: '',
@@ -113,59 +112,24 @@ function MainApp({ session }) {
   }, [connection])
 
   // ====== embed mode 判定 (flow-builder iframe 内 = funnel_id 検出) ======
+  // Phase B.7.4: NAV は embed/standalone どちらも表示。初期ページのみ振り分け。
   const { funnelId, isEmbedded } = useFlowContext()
+  const initialPage = isEmbedded && funnelId ? 'sequences' : 'dashboard'
 
-  // embed mode: NAV 非表示で Sequences のみ描画 (Phase B 拡張版 確定動作維持)
-  if (isEmbedded && funnelId) {
-    return <EmbeddedView session={session} />
-  }
-
-  // standalone mode: 元の 7 アイコン NAV + state ベース view 切替
   return (
     <StandaloneView
       session={session}
       connection={connection}
       setConnection={setConnection}
       loading={loadingConnection}
+      initialPage={initialPage}
     />
   )
 }
 
-// ====== embed mode ビュー (flow-builder iframe 内、NAV 非表示) ======
-function EmbeddedView({ session }) {
-  const isSessionActive = Boolean(session)
-  return (
-    <div className="app-container">
-      <div className="main-content">
-        <header className="h-12 bg-white border-b border-digi-border flex items-center justify-between px-4 shrink-0">
-          <h1 className="text-sm font-semibold text-digi-text">配信ステップ</h1>
-          <span
-            className="flex items-center gap-1.5 text-xs text-digi-text-muted"
-            data-connection-status
-            title={isSessionActive ? '接続済' : '未接続'}
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isSessionActive ? 'bg-digi-green-light' : 'bg-digi-text-muted/40'
-              }`}
-              aria-hidden
-            />
-          </span>
-        </header>
-
-        <AIContentCopyBarLine />
-
-        <main className="content-area" data-content-area>
-          <Sequences />
-        </main>
-      </div>
-    </div>
-  )
-}
-
-// ====== standalone mode ビュー (line.digicollabo.com 直接、7 アイコン NAV) ======
-function StandaloneView({ session, connection, setConnection, loading }) {
-  const [currentPage, setCurrentPage] = useState('dashboard')
+// ====== メインビュー (mail iframe と並列構成、NAV 常時表示) ======
+function StandaloneView({ session, connection, setConnection, loading, initialPage = 'dashboard' }) {
+  const [currentPage, setCurrentPage] = useState(initialPage)
 
   const isSessionActive = Boolean(session)
   const isTokenSet = Boolean(connection.channelAccessToken && connection.isConnected)
