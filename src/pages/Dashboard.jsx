@@ -3,8 +3,11 @@ import { Users, Send, Workflow, Calendar, TrendingUp, AlertCircle, ArrowRight } 
 import { demoStats, demoSequences, demoBroadcasts } from '../lib/demoData'
 import { getBotInfo, getMessageQuota, getMessageQuotaConsumption, getFollowers } from '../lib/lineProxy'
 import { supabase, isSupabaseMode, resolveConnectionId } from '../lib/supabase'
+import { useFlowContext } from '../hooks/useFlowContext'
+import LineAutoDeliveryPanel from '../components/LineAutoDeliveryPanel'
 
 export default function Dashboard({ isTokenSet, connection, setCurrentPage }) {
+  const { funnelId, isEmbedded } = useFlowContext()
   const [stats, setStats] = useState({
     totalFriends: demoStats.totalFriends,
     sentThisMonth: demoStats.sentThisMonth,
@@ -89,6 +92,11 @@ export default function Dashboard({ isTokenSet, connection, setCurrentPage }) {
 
   return (
     <div className="p-6 max-w-7xl mx-auto" data-page="dashboard">
+      {/* AI 自動配信パネル (フロービルダーから ?funnel_id=xxx で開かれた時のみ表示) */}
+      {isEmbedded && funnelId && (
+        <LineAutoDeliveryPanel funnelId={funnelId} />
+      )}
+
       {/* セットアップ誘導 */}
       {!isTokenSet && (
         <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-start gap-3" data-setup-banner>

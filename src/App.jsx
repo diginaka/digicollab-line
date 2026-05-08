@@ -5,8 +5,6 @@ import {
 } from 'lucide-react'
 import { localStore, isSupabaseMode, supabase } from './lib/supabase'
 import { initSSO } from './lib/initSSO'
-import { useFlowContext } from './hooks/useFlowContext'
-import { AIContentCopyBarLine } from './components/AIContentCopyBarLine'
 import Dashboard from './pages/Dashboard'
 import Friends from './pages/Friends'
 import Messages from './pages/Messages'
@@ -18,8 +16,8 @@ import Settings from './pages/Settings'
 // Phase B.7.4 (2026-05-04): embed mode (flow-builder iframe 内) でも NAV 表示 =
 // mail iframe と完全並列構成。Phase B.7.3 v2 起動プロンプトの「案 A: embed では
 // NAV 非表示」判断は達也さんビジョン (mail と並列) と不整合だったため案 B に修正。
-// 初期ページは embed なら 'sequences' (フロービルダー ℹ️ タブからの想定遷移先)、
-// standalone なら 'dashboard'。useFlowContext 検出は initialPage 振り分けに使用。
+// 2026-05-08: AI 自動配信パネル (LineAutoDeliveryPanel) を Dashboard 上に
+// 配置する設計変更に伴い、初期ページは embed/standalone とも 'dashboard' に統一。
 const EMPTY_CONNECTION = {
   channelAccessToken: '',
   botName: '',
@@ -111,10 +109,12 @@ function MainApp({ session }) {
     localStore.set('connection', connection)
   }, [connection])
 
-  // ====== embed mode 判定 (flow-builder iframe 内 = funnel_id 検出) ======
-  // Phase B.7.4: NAV は embed/standalone どちらも表示。初期ページのみ振り分け。
-  const { funnelId, isEmbedded } = useFlowContext()
-  const initialPage = isEmbedded && funnelId ? 'sequences' : 'dashboard'
+  // ====== 初期ページ ======
+  // Phase B.7.4: NAV は embed/standalone どちらも表示。
+  // 2026-05-08: AI 自動配信パネル (LineAutoDeliveryPanel) を Dashboard 上に
+  // 配置するため、embed 時も初期ページを 'dashboard' に統一。
+  // ステップ配信タブにはサイドバーから遷移可能。funnel_id 検出は Dashboard.jsx 側。
+  const initialPage = 'dashboard'
 
   return (
     <StandaloneView
@@ -193,8 +193,8 @@ function StandaloneView({ session, connection, setConnection, loading, initialPa
           </span>
         </header>
 
-        {/* AIContentCopyBarLine は配信ステップ画面のみ表示 (PR #7 改善維持) */}
-        {currentPage === 'sequences' && <AIContentCopyBarLine />}
+        {/* 旧 AIContentCopyBarLine (コピペ式プルダウン) は LineAutoDeliveryPanel に置き換え。
+            自動配信パネルは Dashboard.jsx 内で ?funnel_id=xxx 検出時のみ表示する。 */}
 
         <main className="content-area" data-content-area>
           {pages[currentPage]}
