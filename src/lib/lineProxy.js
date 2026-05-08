@@ -12,6 +12,29 @@ const PROXY_BASE = import.meta.env.VITE_N8N_WEBHOOK_BASE || 'https://n8n.digicol
 const PROXY_URL = `${PROXY_BASE}/webhook/dc-line-proxy`
 
 /**
+ * 安全な JSON パース。
+ * n8n webhook が空ボディ (204 等) や非JSONを返した場合に
+ * `Unexpected end of JSON input` で画面が壊れるのを防ぐ。
+ *
+ * @param {Response} res
+ * @returns {Promise<any|null>}
+ */
+async function safeJson(res) {
+  // Content-Type を確認: JSON でなければパースしない (PNG/JPEG 等のバイナリ対策)
+  const ct = res.headers.get('content-type') || ''
+  if (ct && !ct.includes('json')) {
+    return null
+  }
+  const text = await res.text()
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+/**
  * @param {{ token: string, method: 'GET'|'POST'|'PUT'|'DELETE', endpoint: string, body?: any }} request
  * @returns {Promise<{ success: boolean, data?: any, error?: string }>}
  */
@@ -28,9 +51,20 @@ export async function callLineApi(request) {
       }),
     })
     if (!response.ok) {
-      return { success: false, error: `通信エラー (${response.status})` }
+      const errBody = await safeJson(response)
+      return { success: false, error: errBody?.error || `通信エラー (${response.status})` }
     }
-    return await response.json()
+    const json = await safeJson(response)
+    if (json == null) {
+      // 空ボディは「成功だがデータ無し」として扱う (LINE API の 204 No Content 等)
+      return { success: true, data: null }
+    }
+    // n8n WF が { success, data, error } 形式で返してくる前提
+    if (typeof json === 'object' && 'success' in json) {
+      return json
+    }
+    // 直接データを返してきた場合 (フォールバック)
+    return { success: true, data: json }
   } catch (err) {
     return { success: false, error: err.message || '通信エラーが発生しました' }
   }
@@ -53,9 +87,59 @@ export async function richMenuProxy(connectionId, action, params = {}) {
       }),
     })
     if (!res.ok) {
-      return { status: 'failed', error: `HTTP ${res.status}` }
+      const errBody = await safeJson(res)
+      return { status: 'failed', error: errBody?.error || `HTTP ${res.status}` }
     }
-    return await res.json()
+    const json = await safeJson(res)
+    if (json == null) {
+      // 空ボディ = 成功扱い (delete / set_default 系で n8n が 204 を返すケース)
+      return { status: 'success', data: null }
+    }
+    // status 未指定なら 'success' とみなす (n8n WF が { data: ... } だけ返す場合のフォールバック)
+    if (typeof json === 'object' && !('status' in json)) {
+      return { status: 'success', data: json.data ?? json }
+    }
+    return json
+  } catch (err) {
+    return { status: 'failed', error: err.message || '通信エラー' }
+  }
+}
+
+// ==== テスト送信専用中継 (WF-LINE-TEST) ====
+// シーケンス画面から「テスト送信」ボタンで自分の LINE userId に
+// 単発送信する用。n8n WF-LINE-TEST にルーティング。
+//
+// n8n 側仕様 (推定):
+//   POST /webhook/dc-line-test
+//   body: { connection_id, line_user_id, messages: [{ type, text|... }] }
+//   返却: { status: 'sent'|'failed', error?: string }
+//
+// 未デプロイ時のフォールバック:
+//   呼び出し側で response.status === 'failed' を検知して pushMessage に切り替え可能。
+const TEST_SEND_URL = `${PROXY_BASE}/webhook/dc-line-test`
+
+/**
+ * @param {{ connectionId: string, lineUserId: string, messages: Array<object> }} params
+ * @returns {Promise<{ status: 'sent'|'failed', error?: string }>}
+ */
+export async function lineTestSendProxy({ connectionId, lineUserId, messages }) {
+  try {
+    const res = await fetch(TEST_SEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        connection_id: connectionId,
+        line_user_id: lineUserId,
+        messages,
+      }),
+    })
+    if (!res.ok) {
+      const errBody = await safeJson(res)
+      return { status: 'failed', error: errBody?.error || `HTTP ${res.status}` }
+    }
+    const json = await safeJson(res)
+    if (json == null) return { status: 'sent' }
+    return json
   } catch (err) {
     return { status: 'failed', error: err.message || '通信エラー' }
   }
@@ -86,9 +170,14 @@ export async function sendBroadcastViaProxy({ connectionId, message, broadcast, 
       body: JSON.stringify(payload),
     })
     if (!res.ok) {
-      return { status: 'failed', error: `HTTP ${res.status}` }
+      const errBody = await safeJson(res)
+      return { status: 'failed', error: errBody?.error || `HTTP ${res.status}` }
     }
-    return await res.json()
+    const json = await safeJson(res)
+    if (json == null) {
+      return { status: 'sent', type: 'unknown', recipientCount: 0 }
+    }
+    return json
   } catch (err) {
     return { status: 'failed', error: err.message || '通信エラー' }
   }

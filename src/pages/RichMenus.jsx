@@ -92,10 +92,19 @@ export default function RichMenus({ isTokenSet, connection }) {
       setConnectionId(connId)
 
       const result = await richMenuProxy(connId, 'list')
-      if (result.status !== 'success' && result.status !== undefined) {
-        throw new Error(result.error || 'リッチメニューの取得に失敗しました')
+      if (result.status === 'failed') {
+        // n8n WF / LINE API のエラー文言は技術的すぎるので、UI 用に整形して投げる
+        const raw = result.error || ''
+        const friendly = /JSON|Unexpected/.test(raw)
+          ? 'リッチメニュー一覧のレスポンスを解析できませんでした (n8n 経路の応答形式を確認してください)'
+          : raw || 'リッチメニューの取得に失敗しました'
+        throw new Error(friendly)
       }
-      const rawList = result.data?.body?.richmenus || result.data?.richmenus || []
+      // n8n WF が返す形:  { status: 'success', data: { body: { richmenus: [...] } } }
+      // フォールバック    { status: 'success', data: { richmenus: [...] } }
+      // 空ボディ          { status: 'success', data: null } → 0 件扱い
+      const rawList =
+        result.data?.body?.richmenus || result.data?.richmenus || []
 
       const mapped = rawList.map((m) => ({
         id: m.richMenuId,
