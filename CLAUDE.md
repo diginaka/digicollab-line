@@ -5,7 +5,7 @@
 
 ## 正本ドキュメント
 
-- フロービルダー 自律並列開発ルール v1.0(Opus 4.8 / Dynamic Workflows)
+- フロービルダー 自律並列開発ルール v1.1(Opus 4.8 / Dynamic Workflows)
   https://docs.craft.do/editor/d/eb42ae3b-f06f-84d3-7e4a-592e6b4dc2ad/2d5bb3c9-6359-f78d-c10d-95da6229874e
 - フロービルダー 2台運用 実行台帳(Live Dispatch Board)
   https://docs.craft.do/editor/d/eb42ae3b-f06f-84d3-7e4a-592e6b4dc2ad/c958a39f-79ae-d922-3bff-b62b2c9a7f02
@@ -20,13 +20,15 @@
    - 開発中は mcp__supabase__create_branch でブランチ DB を作成して作業
 
 2. 本番デプロイは明示許可制 & 単独エージェント実行
-   - 対象本番ドメイン: digicollabo.com / cart.digicollabo.com / page.digicollabo.com / course.digicollabo.com / webinar.digicollabo.com / book.digicollabo.com / flow-builder.thefusebase.app
+   - 対象本番ドメイン: digicollabo.com / cart.digicollabo.com / page.digicollabo.com / course.digicollabo.com / webinar.digicollabo.com / book.digicollabo.com / mail.digicollabo.com / line.digicollabo.com
+   - 配信基盤: Supabase Edge Function + Cloudflare Pages
    - 並列ワークフローの最終ステップとして 1 本だけ起動すること
    - プレビュー(Cloudflare Pages preview branch)は並列 OK
 
-3. 配信系(MailerLite / LINE / n8n)はデフォルト draft モード
+3. 配信系(Brevo / LINE / n8n)はデフォルト draft モード
    - 開発中・テスト中の generated_step_contents.delivery_status は 'draft' を強制
    - 本番配信は機能完成後の単独実行ステップ
+   - Brevo API キーは business_profiles.brevo_api_key_enc(暗号化Vault)に保管、EF が復号して利用。平文 env キーは本体不使用
 
 4. 並列作業時は git worktree 隔離を必須
    - .claude/worktrees/{ブランチ名}/ 配下で動作
@@ -52,17 +54,17 @@
 
 ## 起票時の必須突合
 
-新タスク起票時、Craft §9「マスター表」と現状の .env.local / Cloudflare 環境変数を突合し、
+新タスク起票時、Craft v1.1 §9「マスター表」と現状の .env.local / Cloudflare 環境変数を突合し、
 不足を「キー名 / 用途 / 取得先」で列挙して人間の承認を得てから着手すること。
 
 ## このリポジトリ固有の情報
 
 - リポジトリ: diginaka/digicollab-line
 - 本番ドメイン: line.digicollabo.com
-- 主要テーブル: flowbuilder_apps / flow_builder_funnels / generated_step_contents / funnel_templates / fb_bookings
+- 主要テーブル: flowbuilder_apps / flow_builder_funnels / generated_step_contents / funnel_templates / fb_bookings / business_profiles
 - 管理画面: /admin
 - BYOK モデル(ユーザー API キー前提)
 
 ---
 
-最終更新: 2026/05/31(v1.0 初版)
+最終更新: 2026/05/31(v1.1 — Brevo / digicollabo.com 正規化)
