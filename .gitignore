@@ -3,3 +3,6 @@ dist/
 .env
 *.zip
 .claude/
+
+# 機体識別ファイル / machine-local, do not commit
+CLAUDE.local.md
