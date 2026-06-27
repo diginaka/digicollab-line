@@ -4,6 +4,11 @@ import {
   LayoutGrid, Settings as SettingsIcon, Loader2,
 } from 'lucide-react'
 import { localStore, isSupabaseMode, supabase } from './lib/supabase'
+import {
+  sanitizeConnectionForStorage,
+  purgePlaintextToken,
+  CONNECTION_STORE_KEY,
+} from './lib/connectionStorage'
 import { initSSO } from './lib/initSSO'
 import Dashboard from './pages/Dashboard'
 import Friends from './pages/Friends'
@@ -99,14 +104,21 @@ export default function App() {
 }
 
 function MainApp({ session }) {
-  // ====== 接続情報（LINE Messaging API用のBYOK情報、localStorage 永続化） ======
-  const [connection, setConnection] = useState(() =>
-    localStore.get('connection', EMPTY_CONNECTION)
-  )
+  // ====== 接続情報（LINE接続のメタ情報、localStorage 永続化） ======
+  // SE-5 A-2a: 平文 channelAccessToken はブラウザ at-rest に残さない。
+  //   - 起動時に既存 localStorage の平文トークンを一度だけ purge（後方互換クリーンアップ）。
+  //   - メモリ上の connection も channelAccessToken を空にして読み込む（EMPTY_CONNECTION 既定の '' を維持）。
+  //   - 以降の保存はサニタイズ後（トークン除外）のみ。
+  //   トークンは統合ツール設定で暗号化管理され、送信は fb-line-write（server 復号）経由に集約済み。
+  const [connection, setConnection] = useState(() => {
+    purgePlaintextToken(localStore)
+    const stored = localStore.get(CONNECTION_STORE_KEY, EMPTY_CONNECTION)
+    return { ...EMPTY_CONNECTION, ...sanitizeConnectionForStorage(stored) }
+  })
   const [loadingConnection] = useState(false)
 
   useEffect(() => {
-    localStore.set('connection', connection)
+    localStore.set(CONNECTION_STORE_KEY, sanitizeConnectionForStorage(connection))
   }, [connection])
 
   // ====== 初期ページ ======
@@ -132,7 +144,11 @@ function StandaloneView({ session, connection, setConnection, loading, initialPa
   const [currentPage, setCurrentPage] = useState(initialPage)
 
   const isSessionActive = Boolean(session)
-  const isTokenSet = Boolean(connection.channelAccessToken && connection.isConnected)
+  // SE-5 A-2a: 接続判定を平文トークン依存から外し、サーバ由来の接続状態（isConnected）で判定する。
+  //   平文トークンは at-rest に保持しないため、トークンの有無で判定すると接続済みユーザーが
+  //   誤って「未接続」になってしまう。LINE API 直呼びを行う Dashboard / Broadcasts は
+  //   各々が channelAccessToken の有無を別途ガードし、トークン非保持時は demo / 中立表示にフォールバックする。
+  const isTokenSet = Boolean(connection.isConnected)
   const currentItem = NAV.find((n) => n.id === currentPage)
 
   const pages = {
