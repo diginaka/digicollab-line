@@ -39,6 +39,7 @@ export async function callLineApi(request) {
 // ==== リッチメニュー専用中継 (WF-LINE-RICHMENU) ====
 // POST /webhook/dc-line-richmenu
 // action: list | create | upload_image | set_default | cancel_default | delete
+//       | link_user | unlink_user | refresh_user_link  ← 機能③ 個別切替
 const RICHMENU_URL = `${PROXY_BASE}/webhook/dc-line-richmenu`
 
 export async function richMenuProxy(connectionId, action, params = {}) {
@@ -60,6 +61,36 @@ export async function richMenuProxy(connectionId, action, params = {}) {
     return { status: 'failed', error: err.message || '通信エラー' }
   }
 }
+
+// ==== 個別ユーザー link/unlink の便利関数 (機能③) ====
+
+/**
+ * 特定ユーザーに特定リッチメニューを紐付け (LINE link API)
+ * 友だち詳細画面の「特定メニューに固定」ボタンから呼ぶ
+ */
+export function linkUserRichMenu(connectionId, lineUserId, richMenuId, opts = {}) {
+  return richMenuProxy(connectionId, 'link_user', {
+    line_user_id: lineUserId,
+    richMenuId,
+    rich_menu_pk_id: opts.richMenuPkId || null,
+    link_record_id: opts.linkRecordId || null,
+  })
+}
+
+/**
+ * 特定ユーザーの個別リッチメニュー紐付けを解除 (LINE unlink API)
+ * 友だち詳細画面の「個別リンクを解除」ボタンから呼ぶ
+ */
+export function unlinkUserRichMenu(connectionId, lineUserId, opts = {}) {
+  return richMenuProxy(connectionId, 'unlink_user', {
+    line_user_id: lineUserId,
+    link_record_id: opts.linkRecordId || null,
+  })
+}
+
+// 注: refresh は Supabase RPC `enqueue_richmenu_refresh` を直接呼ぶのが推奨
+//     (WF も同じく enqueue 経由なので)。例:
+//     supabase.rpc('enqueue_richmenu_refresh', { p_connection_id, p_line_user_id, p_source: 'manual' })
 
 // ==== 一斉配信専用中継 (WF-LINE-BROADCAST) ====
 // POST /webhook/dc-line-broadcast

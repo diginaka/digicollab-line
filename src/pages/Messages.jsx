@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Loader2, Send, ArrowLeft, MessageSquare, AlertCircle } from 'lucide-react'
+import {
+  Loader2, Send, ArrowLeft, MessageSquare, AlertCircle,
+  LayoutGrid, RefreshCw, Pin, X, ChevronDown, ChevronRight,
+} from 'lucide-react'
 import { supabase, isSupabaseMode } from '../lib/supabase'
 import {
   fetchConversations,
@@ -8,6 +11,7 @@ import {
   markMessagesRead,
   getAttachmentSignedUrl,
 } from '../lib/lineMessages'
+import { linkUserRichMenu, unlinkUserRichMenu } from '../lib/lineProxy'
 
 const POLL_INTERVAL_MS = 5000 // Phase 1 は polling、Realtime は Phase 2
 
@@ -23,6 +27,16 @@ export default function Messages({ isTokenSet, connection }) {
   const [error, setError] = useState(null)
   const [attachmentUrls, setAttachmentUrls] = useState({}) // messageId -> signed URL
   const messagesEndRef = useRef(null)
+
+  // 機能③: 個別リッチメニュー管理 state
+  const [richMenuPanelOpen, setRichMenuPanelOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [currentLinkedMenu, setCurrentLinkedMenu] = useState(null)
+  const [linkHistory, setLinkHistory] = useState([])
+  const [availableMenus, setAvailableMenus] = useState([])
+  const [richMenuActioning, setRichMenuActioning] = useState(false)
+  const [richMenuError, setRichMenuError] = useState(null)
+  const [pinTargetId, setPinTargetId] = useState('')
 
   // ===== connection_id 解決（既存 Friends.jsx と同じパターン）=====
   const resolveConnectionId = useCallback(async () => {
@@ -82,6 +96,141 @@ export default function Messages({ isTokenSet, connection }) {
     setAttachmentUrls(newUrls)
   }, [attachmentUrls])
 
+  // ===== 機能③: リッチメニュー状態ロード =====
+  const loadRichMenuStatus = useCallback(async (cid, lineUserId) => {
+    if (!cid || !lineUserId || !supabase) return
+    try {
+      // 現在 linked のレコード (1件以下のはず)
+      const { data: cur, error: e1 } = await supabase
+        .from('line_user_richmenu_links')
+        .select('id, rich_menu_id, status, source, last_attempted_at, last_error, line_rich_menus(name, line_rich_menu_id)')
+        .eq('connection_id', cid)
+        .eq('line_user_id', lineUserId)
+        .eq('status', 'linked')
+        .maybeSingle()
+      if (e1) console.warn('[Messages] richmenu current load:', e1.message)
+      setCurrentLinkedMenu(cur || null)
+
+      // 履歴 (直近 5 件)
+      const { data: hist, error: e2 } = await supabase
+        .from('line_user_richmenu_links')
+        .select('id, status, source, last_attempted_at, last_error, line_rich_menus(name)')
+        .eq('connection_id', cid)
+        .eq('line_user_id', lineUserId)
+        .order('last_attempted_at', { ascending: false, nullsFirst: false })
+        .limit(5)
+      if (e2) console.warn('[Messages] richmenu history load:', e2.message)
+      setLinkHistory(hist || [])
+
+      // 利用可能メニュー (固定先候補)
+      const { data: menus, error: e3 } = await supabase
+        .from('line_rich_menus')
+        .select('id, line_rich_menu_id, name, target_tags, priority')
+        .eq('connection_id', cid)
+        .eq('is_active', true)
+        .order('priority', { ascending: false })
+      if (e3) console.warn('[Messages] richmenu list load:', e3.message)
+      setAvailableMenus((menus || []).filter((m) => m.line_rich_menu_id))
+    } catch (e) {
+      console.warn('[Messages] loadRichMenuStatus failed:', e.message)
+    }
+  }, [])
+
+  // ===== 機能③: 自動切替を再実行 =====
+  const handleRefreshAuto = async () => {
+    if (!connectionId || !selectedUser || richMenuActioning) return
+    setRichMenuActioning(true)
+    setRichMenuError(null)
+    try {
+      const { error: rpcErr } = await supabase.rpc('enqueue_richmenu_refresh', {
+        p_connection_id: connectionId,
+        p_line_user_id: selectedUser.line_user_id,
+        p_source: 'manual',
+      })
+      if (rpcErr) throw new Error(rpcErr.message)
+      // WF が完了して complete_richmenu_link を呼ぶまで少し待つ
+      setTimeout(() => loadRichMenuStatus(connectionId, selectedUser.line_user_id), 1800)
+    } catch (e) {
+      setRichMenuError(e.message || 'refresh 失敗')
+    } finally {
+      setRichMenuActioning(false)
+    }
+  }
+
+  // ===== 機能③: 特定メニューに固定 =====
+  const handlePinTo = async (menu) => {
+    if (!connectionId || !selectedUser || !menu || richMenuActioning) return
+    setRichMenuActioning(true)
+    setRichMenuError(null)
+    try {
+      // 1. pending レコードを INSERT (link_record_id を確保)
+      const { data: link, error: insertErr } = await supabase
+        .from('line_user_richmenu_links')
+        .insert({
+          connection_id: connectionId,
+          line_user_id: selectedUser.line_user_id,
+          rich_menu_id: menu.id,
+          status: 'pending',
+          source: 'manual',
+          last_attempted_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single()
+      if (insertErr) throw new Error(insertErr.message)
+
+      // 2. WF link_user 呼び出し (rich_menu_pk_id + link_record_id を渡す)
+      const result = await linkUserRichMenu(
+        connectionId,
+        selectedUser.line_user_id,
+        menu.line_rich_menu_id,
+        { richMenuPkId: menu.id, linkRecordId: link.id }
+      )
+      if (result?.status === 'failed') throw new Error(result.error || 'link 失敗')
+
+      // 3. WF が complete_richmenu_link を呼んだ後にリロード
+      setTimeout(() => loadRichMenuStatus(connectionId, selectedUser.line_user_id), 1500)
+    } catch (e) {
+      setRichMenuError(e.message || 'pin 失敗')
+    } finally {
+      setRichMenuActioning(false)
+    }
+  }
+
+  // ===== 機能③: 個別リンクを解除 =====
+  const handleUnlink = async () => {
+    if (!connectionId || !selectedUser || richMenuActioning) return
+    setRichMenuActioning(true)
+    setRichMenuError(null)
+    try {
+      const { data: link, error: insertErr } = await supabase
+        .from('line_user_richmenu_links')
+        .insert({
+          connection_id: connectionId,
+          line_user_id: selectedUser.line_user_id,
+          rich_menu_id: null,
+          status: 'pending',
+          source: 'manual',
+          last_attempted_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single()
+      if (insertErr) throw new Error(insertErr.message)
+
+      const result = await unlinkUserRichMenu(
+        connectionId,
+        selectedUser.line_user_id,
+        { linkRecordId: link.id }
+      )
+      if (result?.status === 'failed') throw new Error(result.error || 'unlink 失敗')
+
+      setTimeout(() => loadRichMenuStatus(connectionId, selectedUser.line_user_id), 1500)
+    } catch (e) {
+      setRichMenuError(e.message || 'unlink 失敗')
+    } finally {
+      setRichMenuActioning(false)
+    }
+  }
+
   // ===== 初期マウント: connection 解決 + 一覧ロード =====
   useEffect(() => {
     let cancelled = false
@@ -99,6 +248,17 @@ export default function Messages({ isTokenSet, connection }) {
       cancelled = true
     }
   }, [resolveConnectionId, loadConversations])
+
+  // 機能③: selectedUser 変更時にリッチメニュー状態をロード
+  useEffect(() => {
+    if (!connectionId || !selectedUser) {
+      setCurrentLinkedMenu(null)
+      setLinkHistory([])
+      setRichMenuPanelOpen(false)
+      return
+    }
+    loadRichMenuStatus(connectionId, selectedUser.line_user_id)
+  }, [connectionId, selectedUser, loadRichMenuStatus])
 
   // ===== ユーザー選択時: 会話ロード + 既読化 =====
   useEffect(() => {
@@ -326,7 +486,147 @@ export default function Messages({ isTokenSet, connection }) {
                     {selectedUser.line_user_id}
                   </div>
                 </div>
+                {/* 機能③: リッチメニューパネル トグル */}
+                <button
+                  onClick={() => setRichMenuPanelOpen((v) => !v)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 hover:border-green-500 hover:text-green-600 shrink-0"
+                  data-richmenu-panel-toggle
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">
+                    {currentLinkedMenu?.line_rich_menus?.name
+                      ? `RM: ${currentLinkedMenu.line_rich_menus.name}`
+                      : 'リッチメニュー'}
+                  </span>
+                  {richMenuPanelOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                </button>
               </div>
+
+              {/* 機能③: リッチメニュー個別管理パネル */}
+              {richMenuPanelOpen && (
+                <div className="border-b border-slate-200 bg-slate-50 p-4 shrink-0" data-richmenu-panel>
+                  {/* エラー表示 */}
+                  {richMenuError && (
+                    <div className="mb-3 p-2 rounded bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span className="flex-1">{richMenuError}</span>
+                      <button onClick={() => setRichMenuError(null)} className="text-red-500 hover:text-red-700">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* 現在のリッチメニュー */}
+                  <div className="mb-3 flex items-center gap-2 text-xs">
+                    <span className="text-slate-500">現在の個別リッチメニュー:</span>
+                    {currentLinkedMenu ? (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-green-100 text-green-700 font-bold">
+                        <Pin className="w-3 h-3" />
+                        {currentLinkedMenu.line_rich_menus?.name || '(名前不明)'}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">未設定 (デフォルトメニュー or LINE 既定)</span>
+                    )}
+                  </div>
+
+                  {/* アクション */}
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <button
+                      onClick={handleRefreshAuto}
+                      disabled={richMenuActioning}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-slate-200 hover:border-green-500 hover:text-green-600 disabled:opacity-50"
+                      data-richmenu-action="refresh-auto"
+                    >
+                      {richMenuActioning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      自動切替を再実行
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={pinTargetId}
+                        onChange={(e) => setPinTargetId(e.target.value)}
+                        className="text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white"
+                        data-richmenu-pin-select
+                      >
+                        <option value="">特定メニューに固定...</option>
+                        {availableMenus.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                            {m.priority > 0 ? ` (P${m.priority})` : ''}
+                            {m.target_tags?.length > 0 ? ` [${m.target_tags.slice(0, 2).join(',')}]` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => {
+                          const m = availableMenus.find((x) => x.id === pinTargetId)
+                          if (m) handlePinTo(m)
+                        }}
+                        disabled={richMenuActioning || !pinTargetId}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-white border border-slate-200 hover:border-green-500 hover:text-green-600 disabled:opacity-50"
+                        data-richmenu-action="pin"
+                      >
+                        <Pin className="w-3.5 h-3.5" />
+                        固定
+                      </button>
+                    </div>
+                    <button
+                      onClick={handleUnlink}
+                      disabled={richMenuActioning || !currentLinkedMenu}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-slate-200 hover:border-red-500 hover:text-red-600 disabled:opacity-50"
+                      data-richmenu-action="unlink"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      個別リンクを解除
+                    </button>
+                  </div>
+
+                  {/* 履歴 (折りたたみ) */}
+                  <div>
+                    <button
+                      onClick={() => setHistoryOpen((v) => !v)}
+                      className="text-[11px] text-slate-500 hover:text-slate-700 flex items-center gap-1"
+                      data-richmenu-history-toggle
+                    >
+                      {historyOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                      履歴 ({linkHistory.length})
+                    </button>
+                    {historyOpen && (
+                      <div className="mt-2 space-y-1" data-richmenu-history>
+                        {linkHistory.length === 0 && (
+                          <div className="text-[11px] text-slate-400">履歴なし</div>
+                        )}
+                        {linkHistory.map((h) => (
+                          <div
+                            key={h.id}
+                            className="flex items-center gap-2 text-[10px] px-2 py-1 rounded bg-white border border-slate-100"
+                          >
+                            <span
+                              className={`px-1.5 py-0.5 rounded font-bold ${
+                                h.status === 'linked'
+                                  ? 'bg-green-100 text-green-700'
+                                  : h.status === 'unlinked'
+                                  ? 'bg-slate-100 text-slate-600'
+                                  : h.status === 'failed'
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}
+                            >
+                              {h.status}
+                            </span>
+                            <span className="text-slate-400">{h.source}</span>
+                            <span className="flex-1 truncate text-slate-600">
+                              {h.line_rich_menus?.name || '-'}
+                            </span>
+                            <span className="text-slate-400 shrink-0">
+                              {h.last_attempted_at ? new Date(h.last_attempted_at).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* メッセージリスト */}
               <div

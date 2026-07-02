@@ -1,0 +1,228 @@
+{
+  "_meta": {
+    "savedAt": "2026-05-02",
+    "purpose": "pre-individual-link backup before 機能③ リッチメニュー個別切替 expansion",
+    "originalNodeCount": 13,
+    "workflowId": "QvjtVzobntX7xr4W",
+    "workflowName": "WF-LINE-RICHMENU: リッチメニュー管理中継",
+    "activeVersionId": "84066a13-8a1a-4d5b-8184-ec833fe7f074",
+    "topologySummary": "Webhook → バリデーション → トークン取得 → トークン確認 → アクション分岐 (6 cases) → 6 action nodes → 成功レスポンス → レスポンス返却",
+    "actionsBeforeExpansion": ["list", "create", "upload_image", "set_default", "cancel_default", "delete"]
+  },
+  "id": "QvjtVzobntX7xr4W",
+  "name": "WF-LINE-RICHMENU: リッチメニュー管理中継",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dc-line-richmenu",
+        "responseMode": "responseNode",
+        "options": { "allowedOrigins": "*" }
+      },
+      "id": "rm-trigger",
+      "name": "Webhook受信",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "webhookId": "126a466b-efa3-499c-9acd-82439b4291c3",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst action = body.action;\nconst connectionId = body.connection_id;\n\nconst validActions = ['list', 'create', 'upload_image', 'set_default', 'cancel_default', 'delete'];\n\nif (!action || !validActions.includes(action)) {\n  throw new Error(`無効なアクション: ${action}。有効: ${validActions.join(', ')}`);\n}\nif (!connectionId) {\n  throw new Error('connection_id は必須です');\n}\n\nreturn [{\n  json: {\n    action,\n    connection_id: connectionId,\n    richMenuId: body.richMenuId || null,\n    menuData: body.menuData || null,\n    imageBase64: body.imageBase64 || null,\n    imageContentType: body.imageContentType || 'image/png'\n  }\n}];"
+      },
+      "id": "rm-validate",
+      "name": "バリデーション",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [224, 0]
+    },
+    {
+      "parameters": {
+        "url": "=https://whpqheywobndaeaikchh.supabase.co/rest/v1/line_connections?id=eq.{{ $json.connection_id }}&select=channel_access_token,is_connected",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "id": "rm-fetch-token",
+      "name": "トークン取得",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [448, 0],
+      "credentials": {
+        "httpHeaderAuth": { "id": "ggbicx9TBJ3h1T5T", "name": "Supabase Header Auth" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('バリデーション').first().json;\nconst tokenData = $input.first().json;\n\nconst record = Array.isArray(tokenData) ? tokenData[0] : tokenData;\nif (!record || !record.channel_access_token) {\n  throw new Error('LINE接続情報が見つかりません。');\n}\nif (!record.is_connected) {\n  throw new Error('LINE未接続です。');\n}\n\nreturn [{\n  json: {\n    ...prev,\n    token: record.channel_access_token\n  }\n}];"
+      },
+      "id": "rm-token-check2",
+      "name": "トークン確認",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [672, 0]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "version": 2 }, "combinator": "and", "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "list", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "conditions": { "options": { "version": 2 }, "combinator": "and", "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "create", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "conditions": { "options": { "version": 2 }, "combinator": "and", "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "upload_image", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "conditions": { "options": { "version": 2 }, "combinator": "and", "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "set_default", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "conditions": { "options": { "version": 2 }, "combinator": "and", "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "cancel_default", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "conditions": { "options": { "version": 2 }, "combinator": "and", "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "delete", "operator": { "type": "string", "operation": "equals" } }] } }
+          ]
+        },
+        "options": {}
+      },
+      "id": "rm-switch",
+      "name": "アクション分岐",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://api.line.me/v2/bot/richmenu/list",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $('トークン確認').first().json.token }}" }] },
+        "options": { "response": { "response": { "fullResponse": true } } }
+      },
+      "id": "rm-list",
+      "name": "リッチメニュー一覧取得",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1168, -304]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/richmenu",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $('トークン確認').first().json.token }}" }, { "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('トークン確認').first().json.menuData) }}",
+        "options": { "response": { "response": { "fullResponse": true } } }
+      },
+      "id": "rm-create",
+      "name": "リッチメニュー作成",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1168, -144]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('トークン確認').first().json;\nconst token = data.token;\nconst richMenuId = data.richMenuId;\nconst imageBase64 = data.imageBase64;\nconst contentType = data.imageContentType || 'image/png';\n\nif (!richMenuId || !imageBase64) {\n  throw new Error('richMenuId と imageBase64 は必須です');\n}\n\nconst binaryData = Buffer.from(imageBase64, 'base64');\n\nconst response = await this.helpers.httpRequest({\n  method: 'POST',\n  url: `https://api-data.line.me/v2/bot/richmenu/${richMenuId}/content`,\n  headers: {\n    'Authorization': `Bearer ${token}`,\n    'Content-Type': contentType\n  },\n  body: binaryData,\n  encoding: null,\n  returnFullResponse: true\n});\n\nreturn [{ json: { statusCode: 200, body: {}, action: 'upload_image', richMenuId } }];"
+      },
+      "id": "rm-upload",
+      "name": "リッチメニュー画像アップロード",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1168, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.line.me/v2/bot/user/all/richmenu/{{ $('トークン確認').first().json.richMenuId }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $('トークン確認').first().json.token }}" }] },
+        "options": { "response": { "response": { "fullResponse": true } } }
+      },
+      "id": "rm-set-default",
+      "name": "デフォルト設定",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1168, 160]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "https://api.line.me/v2/bot/user/all/richmenu",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $('トークン確認').first().json.token }}" }] },
+        "options": { "response": { "response": { "fullResponse": true } } }
+      },
+      "id": "rm-cancel-default",
+      "name": "デフォルト解除",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1168, 304]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://api.line.me/v2/bot/richmenu/{{ $('トークン確認').first().json.richMenuId }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $('トークン確認').first().json.token }}" }] },
+        "options": { "response": { "response": { "fullResponse": true } } }
+      },
+      "id": "rm-delete",
+      "name": "リッチメニュー削除",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1168, 464]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst action = $('トークン確認').first().json.action;\n\nconst statusCode = input.statusCode || 200;\nconst body = input.body || input;\n\nreturn [{\n  json: {\n    status: 'success',\n    action,\n    data: body,\n    statusCode\n  }\n}];"
+      },
+      "id": "rm-success",
+      "name": "成功レスポンス",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1408, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": { "entries": [{ "name": "Access-Control-Allow-Origin", "value": "*" }, { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }] }
+        }
+      },
+      "id": "rm-respond",
+      "name": "レスポンス返却",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1632, 0]
+    }
+  ],
+  "connections": {
+    "Webhook受信": { "main": [[{ "node": "バリデーション", "type": "main", "index": 0 }]] },
+    "バリデーション": { "main": [[{ "node": "トークン取得", "type": "main", "index": 0 }]] },
+    "トークン取得": { "main": [[{ "node": "トークン確認", "type": "main", "index": 0 }]] },
+    "トークン確認": { "main": [[{ "node": "アクション分岐", "type": "main", "index": 0 }]] },
+    "アクション分岐": {
+      "main": [
+        [{ "node": "リッチメニュー一覧取得", "type": "main", "index": 0 }],
+        [{ "node": "リッチメニュー作成", "type": "main", "index": 0 }],
+        [{ "node": "リッチメニュー画像アップロード", "type": "main", "index": 0 }],
+        [{ "node": "デフォルト設定", "type": "main", "index": 0 }],
+        [{ "node": "デフォルト解除", "type": "main", "index": 0 }],
+        [{ "node": "リッチメニュー削除", "type": "main", "index": 0 }]
+      ]
+    },
+    "リッチメニュー一覧取得": { "main": [[{ "node": "成功レスポンス", "type": "main", "index": 0 }]] },
+    "リッチメニュー作成": { "main": [[{ "node": "成功レスポンス", "type": "main", "index": 0 }]] },
+    "リッチメニュー画像アップロード": { "main": [[{ "node": "成功レスポンス", "type": "main", "index": 0 }]] },
+    "デフォルト設定": { "main": [[{ "node": "成功レスポンス", "type": "main", "index": 0 }]] },
+    "デフォルト解除": { "main": [[{ "node": "成功レスポンス", "type": "main", "index": 0 }]] },
+    "リッチメニュー削除": { "main": [[{ "node": "成功レスポンス", "type": "main", "index": 0 }]] },
+    "成功レスポンス": { "main": [[{ "node": "レスポンス返却", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}
